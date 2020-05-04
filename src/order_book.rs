@@ -1,43 +1,12 @@
-use serde::Deserialize;
 use std::collections::BTreeMap;
 
-pub fn get_price_from_id(in_prc: usize) -> usize {
-    (88 * 100000000usize).checked_sub(in_prc).unwrap()
-}
+use crate::exchange::normalized::*;
 
+// TODO abstract out into various book events
 #[derive(Debug)]
 pub struct BBOClearEvent {
     pub side: Side,
     pub price: usize,
-}
-
-#[derive(Deserialize, Eq, PartialEq, Debug)]
-pub enum Side {
-    Buy,
-    Sell,
-}
-
-#[derive(Deserialize, Eq, PartialEq, Debug)]
-pub struct LevelDelete {
-    id: usize,
-    side: Side,
-}
-
-#[derive(Deserialize, Eq, PartialEq, Debug)]
-pub struct LevelUpdate {
-    pub id: usize,
-    pub side: Side,
-    pub size: usize,
-}
-
-#[derive(Deserialize, Eq, PartialEq, Debug)]
-#[serde(tag = "action", content = "data")]
-#[serde(rename_all = "lowercase")]
-pub enum LevelData {
-    Partial(Vec<LevelUpdate>),
-    Insert(Vec<LevelUpdate>),
-    Update(Vec<LevelUpdate>),
-    Delete(Vec<LevelDelete>),
 }
 
 #[derive(Ord, PartialOrd, Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,57 +70,32 @@ impl OrderBook {
         }
     }
 
-    pub fn update_level(&mut self, update: &LevelUpdate) {
-        assert_ne!(update.size, 0);
-        let raw_price = get_price_from_id(update.id);
-        match update.side {
+    fn update_level(&mut self, price: usize, side: Side, size: usize) {
+        assert_ne!(size, 0);
+        match side {
             Side::Buy => {
-                let price = BuyPrice::new(raw_price);
-                let level = self
-                    .bids
-                    .get_mut(&price)
-                    .expect("Got level update for nonexistent level");
-                *level = update.size;
+                let price = BuyPrice::new(price);
+                *self.bids.entry(price).or_insert(size) = size;
             }
             Side::Sell => {
-                let price = SellPrice::new(raw_price);
-                let level = self
-                    .asks
-                    .get_mut(&price)
-                    .expect("Got level update for nonexistent level");
-                *level = update.size;
+                let price = SellPrice::new(price);
+                *self.asks.entry(price).or_insert(size) = size;
             }
         }
     }
 
-    pub fn add_level(&mut self, update: &LevelUpdate) {
-        assert_ne!(update.size, 0);
-        let raw_price = get_price_from_id(update.id);
-        match update.side {
-            Side::Buy => {
-                let price = BuyPrice::new(raw_price);
-                assert_eq!(self.bids.insert(price, update.size), None);
-            }
-            Side::Sell => {
-                let price = SellPrice::new(raw_price);
-                assert_eq!(self.asks.insert(price, update.size), None);
-            }
-        }
-    }
-
-    pub fn delete_level(&mut self, delete: &LevelDelete) -> Option<BBOClearEvent> {
-        let raw_price = get_price_from_id(delete.id);
+    fn delete_level(&mut self, price: usize, side: Side) -> Option<BBOClearEvent> {
         let (best_bid, best_ask) = self.bbo();
-        let (test_price, test_side) = match delete.side {
+        let (test_price, test_side) = match side {
             Side::Buy => {
-                let price = BuyPrice::new(raw_price);
+                let price = BuyPrice::new(price);
                 self.bids
                     .remove(&price)
                     .expect("Deleted a level that doesn't exist");
                 (best_bid, Side::Buy)
             }
             Side::Sell => {
-                let price = SellPrice::new(raw_price);
+                let price = SellPrice::new(price);
                 self.asks
                     .remove(&price)
                     .expect("Deleted a level that doesn't exist");
@@ -159,11 +103,25 @@ impl OrderBook {
             }
         };
         match test_price {
-            Some(test_price) if test_price == raw_price => Some(BBOClearEvent {
+            Some(test_price) if test_price == price => Some(BBOClearEvent {
                 side: test_side,
                 price: test_price,
             }),
             _ => None,
+        }
+    }
+
+    pub fn handle_book_event(&mut self, event: &MarketEvent) -> Option<BBOClearEvent> {
+        match event {
+            MarketEvent::Book(BookUpdate { cents, side, size }) => {
+                if *size == 0 {
+                    self.delete_level(*cents, *side)
+                } else {
+                    self.update_level(*cents, *side, *size);
+                    None
+                }
+            }
+            _ => panic!("This book is not expected to consume non book update events"),
         }
     }
 
