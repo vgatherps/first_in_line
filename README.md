@@ -1,2 +1,3 @@
-# bitmex
-dummy bitmex data stream and first-in-line order placer
+First-in-line order placement with basic fair-value from multiple exchanges
+
+data loggers, basic sim, untested trading
