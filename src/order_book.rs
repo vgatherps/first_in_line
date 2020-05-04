@@ -58,8 +58,8 @@ impl SellPrice {
 }
 
 pub struct OrderBook {
-    bids: BTreeMap<BuyPrice, usize>,
-    asks: BTreeMap<SellPrice, usize>,
+    bids: BTreeMap<BuyPrice, f64>,
+    asks: BTreeMap<SellPrice, f64>,
 }
 
 impl OrderBook {
@@ -70,8 +70,8 @@ impl OrderBook {
         }
     }
 
-    fn update_level(&mut self, price: usize, side: Side, size: usize) {
-        assert_ne!(size, 0);
+    fn update_level(&mut self, price: usize, side: Side, size: f64) {
+        assert!(size > 0.00001);
         match side {
             Side::Buy => {
                 let price = BuyPrice::new(price);
@@ -114,7 +114,7 @@ impl OrderBook {
     pub fn handle_book_event(&mut self, event: &MarketEvent) -> Option<BBOClearEvent> {
         match event {
             MarketEvent::Book(BookUpdate { cents, side, size }) => {
-                if *size == 0 {
+                if *size <= 0.000001 {
                     self.delete_level(*cents, *side)
                 } else {
                     self.update_level(*cents, *side, *size);
@@ -130,7 +130,7 @@ impl OrderBook {
         }
     }
 
-    pub fn bbo(&self) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+    pub fn bbo(&self) -> (Option<(usize, f64)>, Option<(usize, f64)>) {
         (
             self.bids
                 .iter()
@@ -143,11 +143,11 @@ impl OrderBook {
         )
     }
 
-    pub fn bids(&self) -> impl Iterator<Item = (&BuyPrice, &usize)> {
+    pub fn bids(&self) -> impl Iterator<Item = (&BuyPrice, &f64)> {
         self.bids.iter()
     }
 
-    pub fn asks(&self) -> impl Iterator<Item = (&SellPrice, &usize)> {
+    pub fn asks(&self) -> impl Iterator<Item = (&SellPrice, &f64)> {
         self.asks.iter()
     }
 }

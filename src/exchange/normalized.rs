@@ -27,13 +27,13 @@ pub enum Side {
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
-    pub size: usize,
+    pub size: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Quote {
     pub cents: usize,
-    pub size: usize,
+    pub size: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]

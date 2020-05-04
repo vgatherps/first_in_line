@@ -18,7 +18,7 @@ pub struct FairValue {
 
 /**
  * Fair price algorithm with depth. In short,
- * * Calculate scored price (price * shares * dpeth_score), as well as overall score for side
+ * * Calculate scored price (price * shares * depth_score), as well as overall score for side
  * * use resulting values to calculate weighted midpoint
  */
 impl FairValue {
@@ -41,7 +41,7 @@ impl FairValue {
 
     fn score_distanced<'a, I>(&self, prices: I) -> (f64, f64)
     where
-        I: Iterator<Item = (f64, f64, usize)>,
+        I: Iterator<Item = (f64, f64, f64)>,
     {
         prices
             .take(self.levels_out)
@@ -55,8 +55,8 @@ impl FairValue {
 
     pub fn fair_value<'a, IB, IS>(&self, bids: IB, asks: IS, bbo: (usize, usize)) -> FairValueResult
     where
-        IB: Iterator<Item = (&'a BuyPrice, &'a usize)>,
-        IS: Iterator<Item = (&'a SellPrice, &'a usize)>,
+        IB: Iterator<Item = (&'a BuyPrice, &'a f64)>,
+        IS: Iterator<Item = (&'a SellPrice, &'a f64)>,
     {
         let (best_bid, best_ask) = bbo;
         let best_bid = cents_to_dollars(best_bid);

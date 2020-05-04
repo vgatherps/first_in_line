@@ -57,7 +57,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                 normalized::MarketEvent::Book(normalized::BookUpdate {
                     cents: cents_from_id(update.id),
                     side: update.side,
-                    size: update.size,
+                    size: update.size as f64,
                 })
             })
             .collect(),
@@ -67,7 +67,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                 normalized::MarketEvent::Book(normalized::BookUpdate {
                     cents: cents_from_id(update.id),
                     side: update.side,
-                    size: 0,
+                    size: 0.0,
                 })
             })
             .collect(),

@@ -1,4 +1,4 @@
-use exchange::bitmex_connection;
+use exchange::{bitmex_connection, coinbase_connection};
 use order_book::*;
 
 mod exchange;
@@ -8,7 +8,7 @@ mod order_book;
 use fair_value::*;
 
 async fn run() {
-    let mut connection = bitmex_connection().await;
+    let mut connection = coinbase_connection().await;
 
     let mut book = OrderBook::new();
     let fair_value = FairValue::new(1.0, 0.01, 10.0, 20);
@@ -27,15 +27,14 @@ async fn run() {
                 let fair = fair_value.fair_value(book.bids(), book.asks(), (bid, ask));
                 if counter % 100 == 0 || fair.fair_price < 0.01 {
                     println!(
-                        "({:.2}, {})x({:.2}, {}), fair {:.4}, counter {}",
+                        "({:.2}, {:.2})x({:.2}, {:.2}), fair {:.4}, counter {}",
                         bid as f64 * 0.01,
                         bid_sz,
                         ask as f64 * 0.01,
                         ask_sz,
                         fair.fair_price,
                         counter
-                        );
-
+                    );
                 }
             }
             _ => (),
