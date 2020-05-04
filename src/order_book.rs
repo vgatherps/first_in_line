@@ -10,12 +10,12 @@ pub struct BBOClearEvent {
 }
 
 #[derive(Ord, PartialOrd, Clone, Copy, Debug, Eq, PartialEq)]
-struct BuyPrice {
+pub struct BuyPrice {
     value: i64,
 }
 
 #[derive(Ord, PartialOrd, Clone, Copy, Debug, Eq, PartialEq)]
-struct SellPrice {
+pub struct SellPrice {
     value: i64,
 }
 
@@ -32,7 +32,7 @@ impl BuyPrice {
         }
     }
 
-    fn unsigned(&self) -> usize {
+    pub fn unsigned(&self) -> usize {
         assert!(self.value <= 0);
         (self.value * -1) as usize
     }
@@ -51,7 +51,7 @@ impl SellPrice {
         }
     }
 
-    fn unsigned(&self) -> usize {
+    pub fn unsigned(&self) -> usize {
         assert!(self.value >= 0);
         self.value as usize
     }
@@ -103,7 +103,7 @@ impl OrderBook {
             }
         };
         match test_price {
-            Some(test_price) if test_price == price => Some(BBOClearEvent {
+            Some((test_price, _)) if test_price == price => Some(BBOClearEvent {
                 side: test_side,
                 price: test_price,
             }),
@@ -130,29 +130,24 @@ impl OrderBook {
         }
     }
 
-    pub fn bbo(&self) -> (Option<usize>, Option<usize>) {
+    pub fn bbo(&self) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
         (
-            self.bids.keys().next().map(|a| a.unsigned()),
-            self.asks.keys().next().map(|a| a.unsigned()),
+            self.bids
+                .iter()
+                .next()
+                .map(|(prc, sz)| (prc.unsigned(), *sz)),
+            self.asks
+                .iter()
+                .next()
+                .map(|(prc, sz)| (prc.unsigned(), *sz)),
         )
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_deserialize() {
-        let val: LevelData = serde_json::from_str("
-{\"table\":\"orderBookL2\",\"action\":\"update\",\"data\":[{\"symbol\":\"XBTUSD\",\"id\":8799279500,\"side\":\"Buy\",\"size\":21944}]}
-        ").unwrap();
-        assert_eq!(
-            val,
-            LevelData::Update(vec![LevelUpdate {
-                id: 8799279500,
-                side: Side::Buy,
-                size: 21944,
-            }])
-        )
+    pub fn bids(&self) -> impl Iterator<Item = (&BuyPrice, &usize)> {
+        self.bids.iter()
+    }
+
+    pub fn asks(&self) -> impl Iterator<Item = (&SellPrice, &usize)> {
+        self.asks.iter()
     }
 }
