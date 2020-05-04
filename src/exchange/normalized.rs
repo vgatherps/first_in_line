@@ -46,6 +46,7 @@ pub struct BBOUpdate {
 pub enum MarketEvent {
     BBO(BBOUpdate),
     Book(BookUpdate),
+    Clear,
 }
 
 #[derive(Deserialize, Serialize, Debug)]

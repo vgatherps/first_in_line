@@ -50,7 +50,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
     };
     use BookUpdate::*;
     let data = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
-    match data {
+    let mut events: Vec<_> = match &data {
         Partial(ups) | Insert(ups) | Update(ups) => ups
             .iter()
             .map(|update| {
@@ -71,5 +71,10 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                 })
             })
             .collect(),
-    }
+    };
+    match &data {
+        Partial(_) => events.insert(0, normalized::MarketEvent::Clear),
+        _ => (),
+    };
+    events
 }

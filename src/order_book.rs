@@ -33,8 +33,8 @@ impl BuyPrice {
     }
 
     fn unsigned(&self) -> usize {
-        assert!(self.value > 0);
-        self.value as usize
+        assert!(self.value <= 0);
+        (self.value * -1) as usize
     }
 }
 
@@ -52,8 +52,8 @@ impl SellPrice {
     }
 
     fn unsigned(&self) -> usize {
-        assert!(self.value < 0);
-        (self.value * -1) as usize
+        assert!(self.value >= 0);
+        self.value as usize
     }
 }
 
@@ -121,14 +121,19 @@ impl OrderBook {
                     None
                 }
             }
+            MarketEvent::Clear => {
+                self.bids.clear();
+                self.asks.clear();
+                None
+            }
             _ => panic!("This book is not expected to consume non book update events"),
         }
     }
 
     pub fn bbo(&self) -> (Option<usize>, Option<usize>) {
         (
-            self.bids.keys().next().map(|a| (-a.value) as usize),
-            self.asks.keys().next().map(|a| a.value as usize),
+            self.bids.keys().next().map(|a| a.unsigned()),
+            self.asks.keys().next().map(|a| a.unsigned()),
         )
     }
 }
