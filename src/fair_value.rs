@@ -1,5 +1,6 @@
 use crate::order_book::{BuyPrice, SellPrice};
 
+#[derive(Default)]
 pub struct FairValueResult {
     pub fair_price: f64,
     pub fair_shares: f64,
@@ -9,6 +10,7 @@ fn cents_to_dollars(cents: usize) -> f64 {
     (cents as f64) * 0.01
 }
 
+#[derive(Copy, Clone)]
 pub struct FairValue {
     denom: f64,
     offset: f64,

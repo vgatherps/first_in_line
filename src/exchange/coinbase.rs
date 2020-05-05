@@ -1,8 +1,7 @@
 use crate::exchange::normalized;
-use async_tungstenite::async_std::connect_async;
+use async_tungstenite::{async_std::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
-use tungstenite::Message;
 
 fn price_to_cents(price: f64) -> usize {
     (price * 100.0).round() as usize
@@ -19,7 +18,7 @@ impl Side {
     fn to_side(&self) -> normalized::Side {
         match self {
             Side::Buy => normalized::Side::Buy,
-            Side::Sell => normalized::Side::Sell
+            Side::Sell => normalized::Side::Sell,
         }
     }
 }
@@ -33,7 +32,7 @@ struct Snapshot {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
 struct L2Update {
-    changes: Vec<(Side, String, String)>
+    changes: Vec<(Side, String, String)>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -96,7 +95,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                 }))
             });
             result
-        },
+        }
         BookUpdate::L2Update(L2Update { changes }) => changes
             .iter()
             .map(|(side, price, size)| {

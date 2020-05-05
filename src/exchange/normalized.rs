@@ -1,18 +1,16 @@
 use async_native_tls::TlsStream;
 use async_std::net::TcpStream;
-use async_tungstenite::stream::Stream as ATStream;
-use async_tungstenite::WebSocketStream;
+use async_tungstenite::{stream::Stream as ATStream, tungstenite::Message, WebSocketStream};
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
-use tungstenite::Message;
 
 pub type DataStream = WebSocketStream<ATStream<TcpStream, TlsStream<TcpStream>>>;
 
-#[derive(Deserialize, Serialize, Debug, Copy, Clone)]
+#[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash)]
+#[repr(C)]
 pub enum Exchange {
     Bitmex,
-    HuobiSpot,
-    HuobiPerp,
+    COUNT,
     OkExSpot,
     OkExPerp,
 }
@@ -50,10 +48,9 @@ pub enum MarketEvent {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct AllMarketDataTypes {
-    exchange: Exchange,
-    timestamp: u128,
-    event: MarketEvent,
+pub struct MarketEventBlock {
+    pub exchange: Exchange,
+    pub events: Vec<MarketEvent>,
 }
 
 pub struct MarketDataStream {
@@ -81,7 +78,7 @@ impl MarketDataStream {
 
     // TODO handle failure gracefully, possibly try reconnecting?
     // just have a stream reconnection callback possibly.
-    pub async fn next(&mut self) -> Vec<MarketEvent> {
+    pub async fn next(&mut self) -> MarketEventBlock {
         let op = self.operator;
         let received: Message = self
             .stream
@@ -89,6 +86,9 @@ impl MarketDataStream {
             .await
             .expect("Market data stream died unexpectedly")
             .expect("Couldn't get valid websockets message");
-        op(received, &mut self.stream)
+        MarketEventBlock {
+            events: op(received, &mut self.stream),
+            exchange: self.exchange,
+        }
     }
 }

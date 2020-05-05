@@ -57,6 +57,7 @@ impl SellPrice {
     }
 }
 
+#[derive(Default)]
 pub struct OrderBook {
     bids: BTreeMap<BuyPrice, f64>,
     asks: BTreeMap<SellPrice, f64>,

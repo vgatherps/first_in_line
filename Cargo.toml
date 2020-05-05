@@ -7,13 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tungstenite = "0.10"
-chrono = "*"
-hdrhistogram = "6.0"
-flate2 = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 async-tungstenite = {version = "0.4", features = ["async-std-runtime", "async-native-tls"]}
 async-std = "*"
 async-native-tls = "*"
 futures = "*"
+futures-delay-queue = "0.4"

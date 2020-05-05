@@ -1,8 +1,7 @@
 use crate::exchange::normalized;
-use async_tungstenite::async_std::connect_async;
+use async_tungstenite::{async_std::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
-use tungstenite::Message;
 
 fn cents_from_id(id: usize) -> usize {
     (100000000 * 88usize).checked_sub(id).unwrap()
