@@ -1,4 +1,4 @@
-use exchange::{bitmex_connection, coinbase_connection};
+use exchange::{bitmex_connection, coinbase_connection, okex_connection, OkexType};
 use order_book::*;
 
 use futures::join;
@@ -14,13 +14,23 @@ use fair_value::*;
 async fn run() {
     let bitmex = bitmex_connection();
     let coinbase = coinbase_connection();
+    let okex_spot = okex_connection(OkexType::Spot);
+    let okex_swap = okex_connection(OkexType::Swap);
+    let okex_quarterly = okex_connection(OkexType::Quarterly);
 
-    let (bitmex, mut coinbase) = join!(bitmex, coinbase);
+    let (bitmex, okex_spot, okex_swap, okex_quarterly, mut coinbase) =
+        join!(bitmex, okex_spot, okex_swap, okex_quarterly, coinbase);
 
     let remote_fair_value = FairValue::new(1.0, 0.01, 10.0, 20);
 
-    let remote_agg =
-        remote_venue_aggregator::RemoteVenueAggregator::new(bitmex, remote_fair_value, 0.001);
+    let remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
+        bitmex,
+        okex_spot,
+        okex_swap,
+        okex_quarterly,
+        remote_fair_value,
+        0.001,
+    );
 
     let mut book = OrderBook::new();
     let fair_value = remote_fair_value;

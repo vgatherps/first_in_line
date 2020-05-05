@@ -4,9 +4,12 @@ use crate::fair_value::{FairValue, FairValueResult};
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, select};
 
-// Hardcoded because futures are a bit silly
+// Hardcoded because futures are a bit silly for selecting variable amounts
 pub struct RemoteVenueAggregator {
     bitmex: MarketDataStream,
+    okex_spot: MarketDataStream,
+    okex_swap: MarketDataStream,
+    okex_quarterly: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
     fairs: [f64; Exchange::COUNT as usize],
     size_ema: [Ema; Exchange::COUNT as usize],
@@ -16,11 +19,17 @@ pub struct RemoteVenueAggregator {
 impl RemoteVenueAggregator {
     pub fn new(
         bitmex: MarketDataStream,
+        okex_spot: MarketDataStream,
+        okex_swap: MarketDataStream,
+        okex_quarterly: MarketDataStream,
         valuer: FairValue,
         size_ratio: f64,
     ) -> RemoteVenueAggregator {
         RemoteVenueAggregator {
             bitmex,
+            okex_spot,
+            okex_swap,
+            okex_quarterly,
             valuer,
             fairs: Default::default(),
             size_ema: [Ema::new(size_ratio); Exchange::COUNT as usize],
@@ -63,6 +72,9 @@ impl RemoteVenueAggregator {
     pub async fn get_new_fair(&mut self) -> f64 {
         select! {
             b = self.bitmex.next().fuse() => self.update_fair_for(b),
+            b = self.okex_spot.next().fuse() => self.update_fair_for(b),
+            b = self.okex_swap.next().fuse() => self.update_fair_for(b),
+            b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
         }
 
         self.calculate_new_fair_price()

@@ -85,21 +85,21 @@ impl OrderBook {
         }
     }
 
+    // TODO some exchanges (okex) send removes for nonexistent levels.
+    // I should understand why and where that happens
     fn delete_level(&mut self, price: usize, side: Side) -> Option<BBOClearEvent> {
         let (best_bid, best_ask) = self.bbo();
         let (test_price, test_side) = match side {
             Side::Buy => {
                 let price = BuyPrice::new(price);
                 self.bids
-                    .remove(&price)
-                    .expect("Deleted a level that doesn't exist");
+                    .remove(&price);
                 (best_bid, Side::Buy)
             }
             Side::Sell => {
                 let price = SellPrice::new(price);
                 self.asks
-                    .remove(&price)
-                    .expect("Deleted a level that doesn't exist");
+                    .remove(&price);
                 (best_ask, Side::Sell)
             }
         };

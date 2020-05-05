@@ -75,7 +75,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
     let message = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
     match &message {
         BookUpdate::Snapshot(ups) => {
-            let mut result = vec![];
+            let mut result = vec![normalized::MarketEvent::Clear];
             ups.bids.iter().for_each(|[price, size]| {
                 let price: f64 = price.parse::<f64>().expect("Bad floating point");
                 let size: f64 = size.parse::<f64>().expect("Bad floating point");

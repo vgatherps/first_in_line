@@ -10,9 +10,10 @@ pub type DataStream = WebSocketStream<ATStream<TcpStream, TlsStream<TcpStream>>>
 #[repr(C)]
 pub enum Exchange {
     Bitmex,
-    COUNT,
     OkExSpot,
     OkExPerp,
+    OkExQuarterly,
+    COUNT,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]
