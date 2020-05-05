@@ -92,14 +92,12 @@ impl OrderBook {
         let (test_price, test_side) = match side {
             Side::Buy => {
                 let price = BuyPrice::new(price);
-                self.bids
-                    .remove(&price);
+                self.bids.remove(&price);
                 (best_bid, Side::Buy)
             }
             Side::Sell => {
                 let price = SellPrice::new(price);
-                self.asks
-                    .remove(&price);
+                self.asks.remove(&price);
                 (best_ask, Side::Sell)
             }
         };

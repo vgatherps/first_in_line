@@ -4,7 +4,12 @@ use crate::fair_value::{FairValue, FairValueResult};
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, select};
 
+use horrorshow::helper::doctype;
+use horrorshow::html;
+use horrorshow::prelude::*;
+
 // Hardcoded because futures are a bit silly for selecting variable amounts
+// TODO make each book only return async market data when it receives a valid level
 pub struct RemoteVenueAggregator {
     bitmex: MarketDataStream,
     okex_spot: MarketDataStream,
@@ -49,30 +54,57 @@ impl RemoteVenueAggregator {
         }
     }
 
-    fn calculate_new_fair_price(&self) -> f64 {
+    pub fn calculate_fair(&self) -> Option<f64> {
         let mut total_price = 0.0;
         let mut total_size = 0.0;
         for i in 0..(Exchange::COUNT as usize) {
             let size = self.size_ema[i].get_value().unwrap_or(0.0);
+            assert!(size >= 0.0);
+            if size < 10.0 {
+                return None;
+            }
             total_price += self.fairs[i] * size;
             total_size += size;
         }
-
-        if total_size < 10.0 {
-            0.0
-        } else {
-            total_price / total_size
-        }
+        Some(total_price / total_size)
     }
 
     // TODO think about fair spread
-    pub async fn get_new_fair(&mut self) -> f64 {
+    pub async fn get_new_fair(&mut self) {
         select! {
             b = self.bitmex.next().fuse() => self.update_fair_for(b),
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
         }
+    }
 
-        self.calculate_new_fair_price()
+    pub fn get_exchange_description(&self, exch: Exchange) -> String {
+        "".into()
+    }
+
+    pub fn get_html_info(&self) -> String {
+        format!(
+            "{}",
+            html! {
+                : doctype::HTML;
+                html {
+                    body {
+                        // attributes
+                        h2(id="heading", class="title") : "Remote fair value summary";
+                        ol(id="Fair values") {
+                            li(first?=true, class="item") {
+                                : format!("Bitmex: {}", self.get_exchange_description(Exchange::Bitmex))
+                            }
+                            li(first?=false, class="item") {
+                                : format!("OkexSpot: {}", self.get_exchange_description(Exchange::OkexSpot))
+                            }
+                            li(first?=false, class="item") {
+                                : format!("OkexSwap: {}", self.get_exchange_description(Exchange::OkexSwap))
+                            }
+                        }
+                    }
+                }
+            }
+        )
     }
 }

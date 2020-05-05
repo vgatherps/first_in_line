@@ -12,9 +12,10 @@ pub enum Exchange {
     Bitmex,
     OkexSpot,
     OkexSwap,
-    OkexQuarterly,
-    Coinbase,
+    // Non-used by remote exchanges go below here
     COUNT,
+    Coinbase,
+    OkexQuarterly,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]

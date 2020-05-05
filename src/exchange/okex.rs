@@ -83,11 +83,13 @@ pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
         Message::Binary(data) => {
             let mut deflater = DeflateDecoder::new(&data[..]);
             let mut s = String::new();
-            deflater.read_to_string(&mut s).expect("Could not unzip okex message");
+            deflater
+                .read_to_string(&mut s)
+                .expect("Could not unzip okex message");
             if s.contains("rror") {
                 panic!("Error subscribing to api: message {}", s);
             }
-        },
+        }
         data => panic!("Incorrect ack type {:?}", data),
     };
     normalized::MarketDataStream::new(stream, which.exchange(), which.get_convert())
@@ -104,10 +106,7 @@ fn convert_derivative(
     convert_inner(data, OkexType::Swap)
 }
 
-fn convert_future(
-    data: Message,
-    _: &mut normalized::DataStream,
-) -> Vec<normalized::MarketEvent> {
+fn convert_future(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
     convert_inner(data, OkexType::Quarterly)
 }
 
@@ -116,25 +115,17 @@ fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent>
         Message::Binary(data) => {
             let mut deflater = DeflateDecoder::new(&data[..]);
             let mut s = String::new();
-            deflater.read_to_string(&mut s).expect("Could not unzip okex message");
+            deflater
+                .read_to_string(&mut s)
+                .expect("Could not unzip okex message");
             s
-        },
+        }
         data => panic!("Incorrect message type {:?}", data),
     };
     let message = serde_json::from_str(&data).expect("Couldn't parse okex message");
     let (mut result, ups) = match &message {
-        BookUpdate::Partial([ups]) => {
-            (
-                vec![normalized::MarketEvent::Clear],
-                ups
-            )
-        },
-        BookUpdate::Update([ups]) => {
-            (
-                vec![],
-                ups
-            )
-        }
+        BookUpdate::Partial([ups]) => (vec![normalized::MarketEvent::Clear], ups),
+        BookUpdate::Update([ups]) => (vec![], ups),
     };
 
     ups.bids.iter().for_each(|[price, size, _, _]| {
