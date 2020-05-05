@@ -1,5 +1,5 @@
 use exchange::{
-    bitmex_connection, bitstamp_connection, coinbase_connection, okex_connection, OkexType,
+    bitmex_connection, bitstamp_connection, okex_connection, OkexType,
 };
 
 use futures::{future::FutureExt, join, select};
@@ -66,5 +66,4 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             tactic.handle_book_update(bbo, local_fair, displacement)
         }
     }
-    Ok(())
 }
