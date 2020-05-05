@@ -62,7 +62,8 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
     // as far as I can tell, only the first awai in the request chain is meaningfully
     // asynchronous.
 
-    let (mut full_diff_update, timestamp) = convert_ts(Message::Text(full_response), &mut l2_stream, true);
+    let (mut full_diff_update, timestamp) =
+        convert_ts(Message::Text(full_response), &mut l2_stream, true);
     // if the most recent diff is after the book update, abort due to inconsistent
     // state. We know this will have one entry
     let first_diff = seen_diff_messages[0].1;
@@ -70,7 +71,7 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
         panic!(
             "Got diffs only after bookupdate: {}, {}",
             timestamp, first_diff
-            );
+        );
     }
     // wait until we have some late-enough updates to ensure
     // we ditch all of the early ones
@@ -103,7 +104,7 @@ fn convert(data: Message, stream: &mut normalized::DataStream) -> Vec<normalized
 fn convert_ts(
     data: Message,
     stream: &mut normalized::DataStream,
-    full: bool
+    full: bool,
 ) -> (Vec<normalized::MarketEvent>, usize) {
     let data = match data {
         Message::Text(data) => data,
@@ -143,5 +144,8 @@ fn convert_ts(
             size: price * size,
         }))
     });
-    (result, microtimestamp.parse().expect("non-integer timestamp"))
+    (
+        result,
+        microtimestamp.parse().expect("non-integer timestamp"),
+    )
 }

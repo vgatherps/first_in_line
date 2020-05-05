@@ -71,7 +71,7 @@ impl MarketDataStream {
         stream: DataStream,
         exchange: Exchange,
         operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
-        ) -> MarketDataStream {
+    ) -> MarketDataStream {
         Self::new_with(stream, exchange, vec![], operator)
     }
 
@@ -80,7 +80,7 @@ impl MarketDataStream {
         exchange: Exchange,
         events: Vec<MarketEvent>,
         operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
-        ) -> MarketDataStream {
+    ) -> MarketDataStream {
         MarketDataStream {
             stream,
             exchange,
@@ -112,8 +112,8 @@ impl MarketDataStream {
                 return MarketEventBlock {
                     events,
                     exchange: self.exchange,
-                }
-            }   
+                };
+            }
         }
     }
 }

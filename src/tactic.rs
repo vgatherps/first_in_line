@@ -10,13 +10,11 @@ impl Tactic {
         &mut self,
         bbo: ((usize, f64), (usize, f64)),
         fair: f64,
-        prem_f: f64,
-        prem_s: f64,
+        adjust: f64,
     ) {
         let ((bid, bid_sz), (ask, ask_sz)) = bbo;
-        let adjust = prem_s - prem_f;
         self.update_count += 1;
-        if self.update_count > 500 && adjust.abs() > 3.0 {
+        if self.update_count > 500 && adjust.abs() > 0.5 {
             self.update_count = 0;
             println!(
                 "({:.2}, {:.2})x({:.2}, {:.2}), fair {:.4}, adjust: {:.2}, adjusted_fair: {:.3}",

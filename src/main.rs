@@ -1,4 +1,6 @@
-use exchange::{bitmex_connection, bitstamp_connection, okex_connection, OkexType, coinbase_connection};
+use exchange::{
+    bitmex_connection, bitstamp_connection, coinbase_connection, okex_connection, OkexType,
+};
 
 use futures::{future::FutureExt, join, select};
 
@@ -18,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     rt.block_on(run())
 }
 
-async fn run() -> Result <(), Box<dyn std::error::Error>> {
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bitmex = bitmex_connection();
     let coinbase = bitstamp_connection();
     let okex_spot = okex_connection(OkexType::Spot);
@@ -45,24 +47,24 @@ async fn run() -> Result <(), Box<dyn std::error::Error>> {
 
     loop {
         select! {
-            rf = remote_agg.get_new_fair().fuse() => {}
+            rf = remote_agg.get_new_fair().fuse() => {
+                if let Some(rf) = remote_agg.calculate_fair() {
+                    displacement.handle_remote(rf);
+                }
+            }
             block = coinbase.next().fuse() => {
                 local_book.handle_book_update(&block.events);
+                if let Some((_, local_fair)) = local_book.get_local_tob() {
+                    displacement.handle_local(local_fair);
+                };
             }
         }
 
-        match (local_book.get_local_tob(), remote_agg.calculate_fair()) {
-            (Some((bbo, local_fair)), Some(remote_fair)) => {
-                displacement.handle_new_fairs(remote_fair, local_fair);
-                match displacement.get_displacement() {
-                    (Some(prem_f), Some(prem_s)) => {
-                        tactic.handle_book_update(bbo, local_fair, prem_f, prem_s)
-                    }
-                    _ => (),
-                }
-            }
-            _ => {}
+        if let (Some((bbo, local_fair)), Some(displacement)) =
+            (local_book.get_local_tob(), displacement.get_displacement())
+        {
+            tactic.handle_book_update(bbo, local_fair, displacement)
         }
     }
-     Ok(())
+    Ok(())
 }
