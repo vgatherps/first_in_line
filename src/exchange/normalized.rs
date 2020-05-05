@@ -1,10 +1,12 @@
-use async_native_tls::TlsStream;
-use async_std::net::TcpStream;
-use async_tungstenite::{stream::Stream as ATStream, tungstenite::Message, WebSocketStream};
+use async_tungstenite::{
+    stream::Stream as ATStream, tokio::TokioAdapter, tungstenite::Message, WebSocketStream,
+};
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpStream;
+use tokio_tls::TlsStream;
 
-pub type DataStream = WebSocketStream<ATStream<TcpStream, TlsStream<TcpStream>>>;
+pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(C)]
@@ -14,6 +16,7 @@ pub enum Exchange {
     OkexSwap,
     // Non-used by remote exchanges go below here
     COUNT,
+    Bitstamp,
     Coinbase,
     OkexQuarterly,
 }
@@ -59,6 +62,7 @@ pub struct MarketEventBlock {
 pub struct MarketDataStream {
     stream: DataStream,
     exchange: Exchange,
+    initial_events: Option<Vec<MarketEvent>>,
     operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
 }
 
@@ -67,32 +71,49 @@ impl MarketDataStream {
         stream: DataStream,
         exchange: Exchange,
         operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
-    ) -> MarketDataStream {
+        ) -> MarketDataStream {
+        Self::new_with(stream, exchange, vec![], operator)
+    }
+
+    pub fn new_with(
+        stream: DataStream,
+        exchange: Exchange,
+        events: Vec<MarketEvent>,
+        operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
+        ) -> MarketDataStream {
         MarketDataStream {
             stream,
             exchange,
+            initial_events: if events.len() > 0 { Some(events) } else { None },
             operator,
         }
-    }
-
-    pub fn exchange(&self) -> Exchange {
-        self.exchange
     }
 
     // TODO handle failure gracefully, possibly try reconnecting?
     // just have a stream reconnection callback possibly.
     pub async fn next(&mut self) -> MarketEventBlock {
+        if let Some(events) = self.initial_events.replace(vec![]) {
+            self.initial_events = None;
+            return MarketEventBlock {
+                events,
+                exchange: self.exchange,
+            };
+        }
         let op = self.operator;
-        let received: Message = self
-            .stream
-            .next()
-            .await
-            .expect("Market data stream died unexpectedly")
-            .expect("Couldn't get valid websockets message");
-
-        MarketEventBlock {
-            events: op(received, &mut self.stream),
-            exchange: self.exchange,
+        loop {
+            let received: Message = self
+                .stream
+                .next()
+                .await
+                .expect("Market data stream died unexpectedly")
+                .expect("Couldn't get valid websockets message");
+            let events = op(received, &mut self.stream);
+            if events.len() > 0 {
+                return MarketEventBlock {
+                    events,
+                    exchange: self.exchange,
+                }
+            }   
         }
     }
 }

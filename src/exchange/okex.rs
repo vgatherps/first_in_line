@@ -1,6 +1,6 @@
 use crate::exchange::normalized;
 
-use async_tungstenite::{async_std::connect_async, tungstenite::Message};
+use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
 use futures::prelude::*;
 use serde::Deserialize;

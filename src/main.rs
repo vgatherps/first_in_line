@@ -1,5 +1,4 @@
-use exchange::{bitmex_connection, coinbase_connection, okex_connection, OkexType};
-use order_book::*;
+use exchange::{bitmex_connection, bitstamp_connection, okex_connection, OkexType, coinbase_connection};
 
 use futures::{future::FutureExt, join, select};
 
@@ -14,9 +13,14 @@ mod tactic;
 
 use fair_value::*;
 
-async fn run() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run())
+}
+
+async fn run() -> Result <(), Box<dyn std::error::Error>> {
     let bitmex = bitmex_connection();
-    let coinbase = coinbase_connection();
+    let coinbase = bitstamp_connection();
     let okex_spot = okex_connection(OkexType::Spot);
     let okex_swap = okex_connection(OkexType::Swap);
 
@@ -60,8 +64,5 @@ async fn run() {
             _ => {}
         }
     }
-}
-
-fn main() {
-    async_std::task::block_on(run());
+     Ok(())
 }

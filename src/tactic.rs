@@ -27,7 +27,7 @@ impl Tactic {
                 fair,
                 adjust,
                 fair + adjust
-                );
+            );
         }
     }
 }

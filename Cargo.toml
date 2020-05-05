@@ -9,10 +9,10 @@ edition = "2018"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-async-tungstenite = {version = "0.4", features = ["async-std-runtime", "async-native-tls"]}
-async-std = "*"
-async-native-tls = "*"
+async-tungstenite = {git = "https://github.com/vgatherps/async-tungstenite", features = ["tokio-runtime", "tokio-tls"]}
+tokio = { version = "*", features = ["full"] }
+tokio-tls = "*"
 futures = "*"
-futures-delay-queue = "0.4"
 flate2 = "*"
 horrorshow = "0.8.3"
+reqwest = { version = "0.10", features = ["json"] }
