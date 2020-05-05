@@ -6,13 +6,14 @@ use serde::{Deserialize, Serialize};
 
 pub type DataStream = WebSocketStream<ATStream<TcpStream, TlsStream<TcpStream>>>;
 
-#[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(C)]
 pub enum Exchange {
     Bitmex,
-    OkExSpot,
-    OkExPerp,
-    OkExQuarterly,
+    OkexSpot,
+    OkexSwap,
+    OkexQuarterly,
+    Coinbase,
     COUNT,
 }
 
@@ -87,6 +88,7 @@ impl MarketDataStream {
             .await
             .expect("Market data stream died unexpectedly")
             .expect("Couldn't get valid websockets message");
+
         MarketEventBlock {
             events: op(received, &mut self.stream),
             exchange: self.exchange,

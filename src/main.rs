@@ -1,11 +1,12 @@
 use exchange::{bitmex_connection, coinbase_connection, okex_connection, OkexType};
 use order_book::*;
 
-use futures::join;
+use futures::{future::FutureExt, join, select};
 
 mod ema;
 mod exchange;
 mod fair_value;
+mod maker;
 mod order_book;
 mod remote_venue_aggregator;
 
@@ -16,50 +17,31 @@ async fn run() {
     let coinbase = coinbase_connection();
     let okex_spot = okex_connection(OkexType::Spot);
     let okex_swap = okex_connection(OkexType::Swap);
-    let okex_quarterly = okex_connection(OkexType::Quarterly);
 
-    let (bitmex, okex_spot, okex_swap, okex_quarterly, mut coinbase) =
-        join!(bitmex, okex_spot, okex_swap, okex_quarterly, coinbase);
+    let (bitmex, okex_spot, okex_swap, mut coinbase) =
+        join!(bitmex, okex_spot, okex_swap, coinbase);
 
-    let remote_fair_value = FairValue::new(1.0, 0.01, 10.0, 20);
+    let remote_fair_value = FairValue::new(0.9, 0.0, 10.0, 20);
 
-    let remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
+    let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
         bitmex,
         okex_spot,
         okex_swap,
-        okex_quarterly,
         remote_fair_value,
         0.001,
     );
 
     let mut book = OrderBook::new();
-    let fair_value = remote_fair_value;
-    let mut counter: usize = 0;
+    let mut maker = maker::Maker::new(remote_fair_value);
     loop {
-        let block = coinbase.next().await;
-
-        for event in block.events {
-            book.handle_book_event(&event);
-        }
-
-        let bbo = book.bbo();
-        counter += 1;
-        match bbo {
-            (Some((bid, bid_sz)), Some((ask, ask_sz))) => {
-                let fair = fair_value.fair_value(book.bids(), book.asks(), (bid, ask));
-                if counter % 100 == 0 || fair.fair_price < 0.01 {
-                    println!(
-                        "({:.2}, {:.2})x({:.2}, {:.2}), fair {:.4}, counter {}",
-                        bid as f64 * 0.01,
-                        bid_sz,
-                        ask as f64 * 0.01,
-                        ask_sz,
-                        fair.fair_price,
-                        counter
-                    );
+        select! {
+            rf = remote_agg.get_new_fair().fuse() => maker.handle_remote_fair(rf),
+            block = coinbase.next().fuse() => {
+                for event in block.events {
+                    book.handle_book_event(&event);
                 }
+                maker.handle_book_update(&book);
             }
-            _ => (),
         }
     }
 }

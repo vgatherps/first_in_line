@@ -9,7 +9,6 @@ pub struct RemoteVenueAggregator {
     bitmex: MarketDataStream,
     okex_spot: MarketDataStream,
     okex_swap: MarketDataStream,
-    okex_quarterly: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
     fairs: [f64; Exchange::COUNT as usize],
     size_ema: [Ema; Exchange::COUNT as usize],
@@ -21,7 +20,6 @@ impl RemoteVenueAggregator {
         bitmex: MarketDataStream,
         okex_spot: MarketDataStream,
         okex_swap: MarketDataStream,
-        okex_quarterly: MarketDataStream,
         valuer: FairValue,
         size_ratio: f64,
     ) -> RemoteVenueAggregator {
@@ -29,7 +27,6 @@ impl RemoteVenueAggregator {
             bitmex,
             okex_spot,
             okex_swap,
-            okex_quarterly,
             valuer,
             fairs: Default::default(),
             size_ema: [Ema::new(size_ratio); Exchange::COUNT as usize],
@@ -61,7 +58,7 @@ impl RemoteVenueAggregator {
             total_size += size;
         }
 
-        if total_size < 1000.0 {
+        if total_size < 10.0 {
             0.0
         } else {
             total_price / total_size
@@ -74,7 +71,6 @@ impl RemoteVenueAggregator {
             b = self.bitmex.next().fuse() => self.update_fair_for(b),
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
-            b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
         }
 
         self.calculate_new_fair_price()

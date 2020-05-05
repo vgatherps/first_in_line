@@ -37,8 +37,8 @@ pub async fn bitmex_connection() -> normalized::MarketDataStream {
             .await
             .expect("Could not connect to bitmex api");
     // eat the two welcome messages
-    stream.next().await.unwrap();
-    stream.next().await.unwrap();
+    let _ = stream.next().await.unwrap();
+    let _ = stream.next().await.unwrap();
     normalized::MarketDataStream::new(stream, normalized::Exchange::Bitmex, convert)
 }
 

@@ -64,7 +64,7 @@ pub async fn coinbase_connection() -> normalized::MarketDataStream {
     stream.send(msg).await.expect("Could not request L2 stream");
     // await subscription request
     stream.next().await.unwrap().unwrap();
-    normalized::MarketDataStream::new(stream, normalized::Exchange::Bitmex, convert)
+    normalized::MarketDataStream::new(stream, normalized::Exchange::Coinbase, convert)
 }
 
 fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {

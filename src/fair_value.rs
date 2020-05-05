@@ -26,7 +26,7 @@ pub struct FairValue {
 impl FairValue {
     pub fn new(denom: f64, offset: f64, dollars_out: f64, levels_out: usize) -> FairValue {
         assert!(denom > 0.0);
-        assert!(offset > 0.0);
+        assert!(offset >= 0.0);
         assert!(dollars_out > 0.0);
         assert!(levels_out > 0);
         FairValue {

@@ -25,6 +25,7 @@ enum BookUpdate {
     Partial([Update; 1]),
 }
 
+#[derive(Debug)]
 pub enum OkexType {
     Spot,
     Swap,
@@ -36,7 +37,15 @@ impl OkexType {
         match self {
             OkexType::Spot => "spot/depth_l2_tbt:BTC-USDT",
             OkexType::Swap => "swap/depth_l2_tbt:BTC-USD-SWAP",
-            OkexType::Quarterly => "swap/depth_l2_tbt:BTC-USD-200626",
+            OkexType::Quarterly => "futures/depth_l2_tbt:BTC-USD-200626",
+        }
+    }
+
+    fn exchange(&self) -> normalized::Exchange {
+        match self {
+            OkexType::Spot => normalized::Exchange::OkexSpot,
+            OkexType::Swap => normalized::Exchange::OkexSwap,
+            OkexType::Quarterly => normalized::Exchange::OkexQuarterly,
         }
     }
 
@@ -52,11 +61,13 @@ impl OkexType {
     ) -> fn(Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
         match self {
             OkexType::Spot => convert_spot,
-            _ => convert_derivative,
+            OkexType::Swap => convert_derivative,
+            _ => convert_future,
         }
     }
 }
 
+// TODO verify that the connection actually works
 pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
     let (mut stream, _) = connect_async("wss://real.OKEx.com:8443/ws/v3")
         .await
@@ -67,9 +78,19 @@ pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
         which.get_product()
     ));
     stream.send(msg).await.expect("Could not request L2 stream");
-    // ignore subscription confirmation
-    let _ = stream.next().await.unwrap().unwrap();
-    normalized::MarketDataStream::new(stream, normalized::Exchange::Bitmex, which.get_convert())
+    let ack = stream.next().await.unwrap().unwrap();
+    match ack {
+        Message::Binary(data) => {
+            let mut deflater = DeflateDecoder::new(&data[..]);
+            let mut s = String::new();
+            deflater.read_to_string(&mut s).expect("Could not unzip okex message");
+            if s.contains("rror") {
+                panic!("Error subscribing to api: message {}", s);
+            }
+        },
+        data => panic!("Incorrect ack type {:?}", data),
+    };
+    normalized::MarketDataStream::new(stream, which.exchange(), which.get_convert())
 }
 
 fn convert_spot(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
@@ -81,6 +102,13 @@ fn convert_derivative(
     _: &mut normalized::DataStream,
 ) -> Vec<normalized::MarketEvent> {
     convert_inner(data, OkexType::Swap)
+}
+
+fn convert_future(
+    data: Message,
+    _: &mut normalized::DataStream,
+) -> Vec<normalized::MarketEvent> {
+    convert_inner(data, OkexType::Quarterly)
 }
 
 fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent> {
