@@ -176,4 +176,8 @@ impl OrderBook {
     pub fn asks(&self) -> impl Iterator<Item = (&SellPrice, &f64)> {
         self.asks.iter()
     }
+
+    pub fn last_seen(&self) -> usize {
+        self.last_update
+    }
 }

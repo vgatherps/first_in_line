@@ -1,7 +1,15 @@
 #![recursion_limit = "256"]
+
+//WARNING
+//WARNING
+//
+//I would not abide by all of the given practices in here in production quality trading code
+
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, okex_connection, OkexType,
 };
+
+use crate::exchange::normalized::*;
 
 use futures::{future::FutureExt, join, select};
 
@@ -20,6 +28,22 @@ use fair_value::*;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run())
+}
+
+#[derive(Debug)]
+pub enum TacticEventType {
+    RemoteFair,
+    LocalBook(SmallVec<MarketEvent>),
+    InsideOrders(SmallVec<local_book::InsideOrder>),
+}
+
+impl TacticEventType {
+    fn tactic_check_orders(&self) -> bool {
+        match self {
+            TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => true,
+            TacticEventType::InsideOrders(_) => false,
+        }
+    }
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,24 +73,50 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut tactic = tactic::Tactic::new();
 
     loop {
-        select! {
-            rf = remote_agg.get_new_fair().fuse() => {
+        let event_type = select! {
+            rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
+            block = bitstamp.next().fuse() => TacticEventType::LocalBook(block.events),
+            order = bitstamp_orders.next().fuse() => TacticEventType::InsideOrders(
+                local_book.handle_new_order(&order.events)),
+        };
+        match &event_type {
+            TacticEventType::RemoteFair => {
                 if let Some(rf) = remote_agg.calculate_fair() {
                     displacement.handle_remote(rf);
                 }
             }
-            block = bitstamp.next().fuse() => {
-                local_book.handle_book_update(&block.events);
+            TacticEventType::LocalBook(events) => {
+                local_book.handle_book_update(&events);
                 if let Some((_, local_fair)) = local_book.get_local_tob() {
                     displacement.handle_local(local_fair);
                 };
             }
+            _ => (),
         }
-
-        if let (Some((bbo, local_fair)), Some(displacement)) =
-            (local_book.get_local_tob(), displacement.get_displacement())
-        {
-            tactic.handle_book_update(bbo, local_fair, displacement)
+        if let (
+            Some((bbo, local_fair)),
+            Some((displacement, expected_premium)),
+            Some(remote_fair),
+        ) = (
+            local_book.get_local_tob(),
+            displacement.get_displacement(),
+            remote_agg.calculate_fair(),
+        ) {
+            match &event_type {
+                TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => {
+                    tactic.handle_book_update(bbo, local_fair, displacement)
+                }
+                TacticEventType::InsideOrders(events) => {
+                    let premium = local_fair - remote_fair;
+                    tactic.handle_new_orders(
+                        ((bbo.0).0, (bbo.1).0),
+                        local_fair,
+                        displacement,
+                        premium - expected_premium,
+                        &events,
+                    )
+                }
+            };
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::exchange::normalized;
+use crate::exchange::{normalized, normalized::SmallVec};
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
@@ -13,8 +13,8 @@ fn price_to_cents(price: f64) -> usize {
 
 #[derive(Deserialize, Debug)]
 struct Update {
-    bids: Vec<[String; 4]>,
-    asks: Vec<[String; 4]>,
+    bids: SmallVec<[String; 4]>,
+    asks: SmallVec<[String; 4]>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -58,7 +58,7 @@ impl OkexType {
 
     fn get_convert(
         &self,
-    ) -> fn(Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+    ) -> fn(Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
         match self {
             OkexType::Spot => convert_spot,
             OkexType::Swap => convert_derivative,
@@ -95,22 +95,28 @@ pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, which.exchange(), which.get_convert())
 }
 
-fn convert_spot(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+fn convert_spot(
+    data: Message,
+    _: &mut normalized::DataStream,
+) -> SmallVec<normalized::MarketEvent> {
     convert_inner(data, OkexType::Spot)
 }
 
 fn convert_derivative(
     data: Message,
     _: &mut normalized::DataStream,
-) -> Vec<normalized::MarketEvent> {
+) -> SmallVec<normalized::MarketEvent> {
     convert_inner(data, OkexType::Swap)
 }
 
-fn convert_future(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+fn convert_future(
+    data: Message,
+    _: &mut normalized::DataStream,
+) -> SmallVec<normalized::MarketEvent> {
     convert_inner(data, OkexType::Quarterly)
 }
 
-fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent> {
+fn convert_inner(data: Message, which: OkexType) -> SmallVec<normalized::MarketEvent> {
     let data = match data {
         Message::Binary(data) => {
             let mut deflater = DeflateDecoder::new(&data[..]);
@@ -124,8 +130,12 @@ fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent>
     };
     let message = serde_json::from_str(&data).expect("Couldn't parse okex message");
     let (mut result, ups) = match &message {
-        BookUpdate::Partial([ups]) => (vec![normalized::MarketEvent::Clear], ups),
-        BookUpdate::Update([ups]) => (vec![], ups),
+        BookUpdate::Partial([ups]) => {
+            let mut small = SmallVec::new();
+            small.push(normalized::MarketEvent::Clear);
+            (small, ups)
+        }
+        BookUpdate::Update([ups]) => (SmallVec::new(), ups),
     };
 
     ups.bids.iter().for_each(|[price, size, _, _]| {

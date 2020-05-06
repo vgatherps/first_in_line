@@ -2,6 +2,7 @@ use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -72,21 +73,21 @@ pub enum MarketEvent {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct MarketEventBlock {
     pub exchange: Exchange,
-    pub events: Vec<MarketEvent>,
+    pub events: SmallVec<MarketEvent>,
 }
 
 pub struct MarketDataStream {
     stream: DataStream,
     exchange: Exchange,
     initial_events: Option<Vec<MarketEvent>>,
-    operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
+    operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
 }
 
 impl MarketDataStream {
     pub fn new(
         stream: DataStream,
         exchange: Exchange,
-        operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
+        operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
     ) -> MarketDataStream {
         Self::new_with(stream, exchange, vec![], operator)
     }
@@ -95,7 +96,7 @@ impl MarketDataStream {
         stream: DataStream,
         exchange: Exchange,
         events: Vec<MarketEvent>,
-        operator: fn(Message, &mut DataStream) -> Vec<MarketEvent>,
+        operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
     ) -> MarketDataStream {
         MarketDataStream {
             stream,
@@ -112,7 +113,7 @@ impl MarketDataStream {
             self.initial_events = None;
             if events.len() > 0 {
                 return MarketEventBlock {
-                    events,
+                    events: events.into_iter().collect(),
                     exchange: self.exchange,
                 };
             }

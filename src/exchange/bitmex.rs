@@ -1,4 +1,4 @@
-use crate::exchange::normalized;
+use crate::exchange::{normalized, normalized::SmallVec};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -24,10 +24,10 @@ struct Update {
 #[serde(tag = "action", content = "data")]
 #[serde(rename_all = "lowercase")]
 enum BookUpdate {
-    Partial(Vec<Update>),
-    Insert(Vec<Update>),
-    Update(Vec<Update>),
-    Delete(Vec<Delete>),
+    Partial(SmallVec<Update>),
+    Insert(SmallVec<Update>),
+    Update(SmallVec<Update>),
+    Delete(SmallVec<Delete>),
 }
 
 // lol hardcoding
@@ -42,14 +42,14 @@ pub async fn bitmex_connection() -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, normalized::Exchange::Bitmex, convert)
 }
 
-fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
     let data = match data {
         Message::Text(data) => data,
         data => panic!("Incorrect message type {:?}", data),
     };
     use BookUpdate::*;
     let data = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
-    let mut events: Vec<_> = match &data {
+    let mut events: SmallVec<_> = match &data {
         Partial(ups) | Insert(ups) | Update(ups) => ups
             .iter()
             .map(|update| {

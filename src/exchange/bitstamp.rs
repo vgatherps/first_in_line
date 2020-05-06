@@ -1,4 +1,4 @@
-use crate::exchange::normalized;
+use crate::exchange::{normalized, normalized::SmallVec};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -10,8 +10,8 @@ fn price_to_cents(price: f64) -> usize {
 #[derive(Deserialize, Debug)]
 struct Snapshot {
     microtimestamp: String,
-    bids: Vec<[String; 2]>,
-    asks: Vec<[String; 2]>,
+    bids: SmallVec<[String; 2]>,
+    asks: SmallVec<[String; 2]>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -118,23 +118,27 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
     )
 }
 
-fn convert(data: Message, stream: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+fn convert(
+    data: Message,
+    stream: &mut normalized::DataStream,
+) -> SmallVec<normalized::MarketEvent> {
     convert_ts(data, stream, false).0
 }
 
 fn convert_ts(
     data: Message,
-    stream: &mut normalized::DataStream,
+    _: &mut normalized::DataStream,
     full: bool,
-) -> (Vec<normalized::MarketEvent>, usize) {
+) -> (SmallVec<normalized::MarketEvent>, usize) {
     let data = match data {
         Message::Text(data) => data,
         Message::Ping(_) => {
-            return (vec![], 0);
+            return (SmallVec::new(), 0);
         }
         data => panic!("Incorrect message type {:?}", data),
     };
     let data: Snapshot = if full {
+        // TODO occasionally, this fails
         serde_json::from_str(&data).expect("Couldn't parse bitstamp message")
     } else {
         let SnapshotWrapper { data } =
@@ -146,7 +150,8 @@ fn convert_ts(
         bids,
         asks,
     } = data;
-    let mut result = vec![normalized::MarketEvent::Clear];
+    let mut result = SmallVec::new();
+    result.push(normalized::MarketEvent::Clear);
     let ts = microtimestamp.parse().expect("non-integer timestamp");
     bids.iter().for_each(|[price, size]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");

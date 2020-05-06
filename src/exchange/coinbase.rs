@@ -1,4 +1,4 @@
-use crate::exchange::normalized;
+use crate::exchange::{normalized, normalized::SmallVec};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -25,14 +25,14 @@ impl Side {
 
 #[derive(Deserialize, Debug)]
 struct Snapshot {
-    bids: Vec<[String; 2]>,
-    asks: Vec<[String; 2]>,
+    bids: SmallVec<[String; 2]>,
+    asks: SmallVec<[String; 2]>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
 struct L2Update {
-    changes: Vec<(Side, String, String)>,
+    changes: SmallVec<(Side, String, String)>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -67,7 +67,7 @@ pub async fn coinbase_connection() -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, normalized::Exchange::Coinbase, convert)
 }
 
-fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
     let data = match data {
         Message::Text(data) => data,
         data => panic!("Incorrect message type {:?}", data),
@@ -75,7 +75,8 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
     let message = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
     match &message {
         BookUpdate::Snapshot(ups) => {
-            let mut result = vec![normalized::MarketEvent::Clear];
+            let mut result = SmallVec::new();
+            result.push(normalized::MarketEvent::Clear);
             ups.bids.iter().for_each(|[price, size]| {
                 let price: f64 = price.parse::<f64>().expect("Bad floating point");
                 let size: f64 = size.parse::<f64>().expect("Bad floating point");
