@@ -110,10 +110,12 @@ impl MarketDataStream {
     pub async fn next(&mut self) -> MarketEventBlock {
         if let Some(events) = self.initial_events.replace(vec![]) {
             self.initial_events = None;
-            return MarketEventBlock {
-                events,
-                exchange: self.exchange,
-            };
+            if events.len() > 0 {
+                return MarketEventBlock {
+                    events,
+                    exchange: self.exchange,
+                };
+            }
         }
         let op = self.operator;
         loop {

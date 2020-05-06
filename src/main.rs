@@ -9,7 +9,6 @@ mod displacement;
 mod ema;
 mod exchange;
 mod fair_value;
-mod full_order_book;
 mod local_book;
 mod order_book;
 mod order_manager;
@@ -45,13 +44,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut local_book = local_book::LocalBook::new(remote_fair_value);
 
-    let mut full_book = full_order_book::FullOrderBook::new();
-
     let mut displacement = displacement::Displacement::new();
 
     let mut tactic = tactic::Tactic::new();
 
-    let mut full_count: usize = 0;
     loop {
         select! {
             rf = remote_agg.get_new_fair().fuse() => {
@@ -64,17 +60,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some((_, local_fair)) = local_book.get_local_tob() {
                     displacement.handle_local(local_fair);
                 };
-            }
-            order = bitstamp_orders.next().fuse() => {
-                for event in &order.events {
-                    full_book.handle_order_update(event);
-                }
-                if order.events.len() < 3 && order.events.len() > 0 {
-                    full_count += 1;
-                    if full_count % 100 == 0 {
-                        println!("Got full order nbbo, local nbbo: {:?}, {:?}, updates {:?}", full_book.bbo(), local_book.get_local_tob(), order.events);
-                    }
-                }
             }
         }
 
