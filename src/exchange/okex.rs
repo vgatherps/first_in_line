@@ -135,6 +135,7 @@ fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent>
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Buy,
+            exchange_time: 0,
         }))
     });
     ups.asks.iter().for_each(|[price, size, _, _]| {
@@ -144,6 +145,7 @@ fn convert_inner(data: Message, which: OkexType) -> Vec<normalized::MarketEvent>
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Sell,
+            exchange_time: 0,
         }))
     });
 

@@ -33,10 +33,20 @@ impl Side {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+pub struct OrderUpdate {
+    pub cents: usize,
+    pub size: f64,
+    pub order_id: usize,
+    pub side: Side,
+    pub exchange_time: usize,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
     pub size: f64,
+    pub exchange_time: usize,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -55,6 +65,7 @@ pub struct BBOUpdate {
 pub enum MarketEvent {
     BBO(BBOUpdate),
     Book(BookUpdate),
+    OrderUpdate(OrderUpdate),
     Clear,
 }
 

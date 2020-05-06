@@ -1,4 +1,6 @@
-use exchange::{bitmex_connection, bitstamp_connection, okex_connection, OkexType};
+use exchange::{
+    bitmex_connection, bitstamp_connection, bitstamp_orders_connection, okex_connection, OkexType,
+};
 
 use futures::{future::FutureExt, join, select};
 
@@ -20,8 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let bitmex = bitmex_connection();
+    let coinbase = bitstamp_orders_connection().await;
     let coinbase = bitstamp_connection();
+    let bitmex = bitmex_connection();
     let okex_spot = okex_connection(OkexType::Spot);
     let okex_swap = okex_connection(OkexType::Swap);
 

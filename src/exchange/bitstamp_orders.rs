@@ -1,3 +1,5 @@
+// TODO TODO TODO de-duplicate from bitstamp
+// TODO TODO TODO de-deplicate the buffering code found here
 use crate::exchange::normalized;
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
@@ -8,21 +10,31 @@ fn price_to_cents(price: f64) -> usize {
 }
 
 #[derive(Deserialize, Debug)]
-struct Snapshot {
+struct Order {
     microtimestamp: String,
-    bids: Vec<[String; 2]>,
-    asks: Vec<[String; 2]>,
+    id: usize,
+    order_type: usize,
+    amount: f64,
+    price: f64,
 }
 
 #[derive(Deserialize, Debug)]
-struct SnapshotWrapper {
-    data: Snapshot,
+struct Snapshot {
+    microtimestamp: String,
+    bids: Vec<[String; 3]>,
+    asks: Vec<[String; 3]>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OrderWrapper {
+    data: Order,
 }
 
 async fn get_bitstamp_stream(which: &str) -> normalized::DataStream {
     let (mut stream, _) = connect_async("wss://ws.bitstamp.net/")
         .await
         .expect("Could not connect to bitstamp api");
+    println!("Connected to bitstamp");
     // What comes first
     let msg = Message::Text(format!(
         "{{
@@ -43,27 +55,26 @@ async fn get_bitstamp_stream(which: &str) -> normalized::DataStream {
 }
 
 // lol hardcoding
-pub async fn bitstamp_connection() -> normalized::MarketDataStream {
-    let mut l2_stream = get_bitstamp_stream("diff_order_book_btcusd").await;
-
+pub async fn bitstamp_orders_connection() -> normalized::MarketDataStream {
+    let mut order_stream = get_bitstamp_stream("live_orders_btcusd").await;
     // wait to get a diff message before we try and request the full book
     // ensure proper ordering
-    let mut first_diff_message = l2_stream.next().await.unwrap().unwrap();
-    let mut seen_diff_messages = vec![convert_ts(first_diff_message, &mut l2_stream, false)];
-    let mut full_response = reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd")
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let mut first_diff_message = order_stream.next().await.unwrap().unwrap();
+    let mut seen_diff_messages = vec![convert_inner(first_diff_message)];
+    let mut full_response =
+        reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd&group=2")
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
 
     let mut real_update_vec = vec![normalized::MarketEvent::Clear];
 
-    // as far as I can tell, only the first awai in the request chain is meaningfully
+    // as far as I can tell, only the first await in the request chain is meaningfully
     // asynchronous.
 
-    let (mut full_diff_update, timestamp) =
-        convert_ts(Message::Text(full_response), &mut l2_stream, true);
+    let (mut full_diff_update, timestamp) = convert_snapshot(&full_response);
     // if the most recent diff is after the book update, abort due to inconsistent
     // state. We know this will have one entry
     let first_diff = seen_diff_messages[0].1;
@@ -76,8 +87,8 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
     // wait until we have some late-enough updates to ensure
     // we ditch all of the early ones
     while seen_diff_messages[seen_diff_messages.len() - 1].1 < timestamp {
-        let diff_message = l2_stream.next().await.unwrap().unwrap();
-        seen_diff_messages.push(convert_ts(diff_message, &mut l2_stream, false));
+        let diff_message = order_stream.next().await.unwrap().unwrap();
+        seen_diff_messages.push(convert_inner(diff_message));
     }
     for (mut diff, diff_timestamp) in seen_diff_messages {
         if diff_timestamp < timestamp {
@@ -90,44 +101,59 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
     // then we ignore all diff updates that only apply to part of the book
 
     normalized::MarketDataStream::new_with(
-        l2_stream,
+        order_stream,
         normalized::Exchange::Bitstamp,
         real_update_vec,
         convert,
     )
 }
 
-fn convert(data: Message, stream: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
-    convert_ts(data, stream, false).0
+fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::MarketEvent> {
+    convert_inner(data).0
 }
 
-fn convert_ts(
-    data: Message,
-    stream: &mut normalized::DataStream,
-    full: bool,
-) -> (Vec<normalized::MarketEvent>, usize) {
+fn convert_inner(data: Message) -> (Vec<normalized::MarketEvent>, usize) {
     let data = match data {
         Message::Text(data) => data,
-        Message::Ping(_) => {
-            return (vec![], 0);
-        }
-        data => panic!("Incorrect message type {:?}", data),
+        Message::Ping(_) => return (Vec::new(), 0),
+        other => panic!("Got bogus message: {:?}", other),
     };
-    let data: Snapshot = if full {
-        serde_json::from_str(&data).expect("Couldn't parse bitstamp message")
-    } else {
-        let SnapshotWrapper { data } =
-            serde_json::from_str(&data).expect("Couldn't parse bitstamp message");
-        data
-    };
+    let OrderWrapper { data } = serde_json::from_str(&data).expect("Couldn't parse snapshot");
+    let Order {
+        microtimestamp,
+        id,
+        order_type,
+        amount,
+        price,
+    } = data;
+    let microtimestamp = microtimestamp.parse().expect("non-integer timestamp");
+    (
+        vec![normalized::MarketEvent::OrderUpdate(
+            normalized::OrderUpdate {
+                exchange_time: microtimestamp,
+                cents: price_to_cents(price),
+                size: amount,
+                side: if order_type == 1 {
+                    normalized::Side::Sell
+                } else {
+                    normalized::Side::Buy
+                },
+                order_id: id,
+            },
+        )],
+        microtimestamp,
+    )
+}
+
+fn convert_snapshot(data: &str) -> (Vec<normalized::MarketEvent>, usize) {
     let Snapshot {
         microtimestamp,
         bids,
         asks,
-    } = data;
+    } = serde_json::from_str(data).expect("Couldn't parse snapshot");
     let mut result = vec![normalized::MarketEvent::Clear];
     let ts = microtimestamp.parse().expect("non-integer timestamp");
-    bids.iter().for_each(|[price, size]| {
+    bids.iter().for_each(|[price, size, id]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
         result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
@@ -137,7 +163,7 @@ fn convert_ts(
             exchange_time: ts,
         }))
     });
-    asks.iter().for_each(|[price, size]| {
+    asks.iter().for_each(|[price, size, id]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
         result.push(normalized::MarketEvent::Book(normalized::BookUpdate {

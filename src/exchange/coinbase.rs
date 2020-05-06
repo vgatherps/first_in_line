@@ -83,6 +83,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                     cents: price_to_cents(price),
                     side: normalized::Side::Buy,
                     size: price * size,
+                    exchange_time: 0,
                 }))
             });
             ups.asks.iter().for_each(|[price, size]| {
@@ -92,6 +93,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                     cents: price_to_cents(price),
                     side: normalized::Side::Sell,
                     size: price * size,
+                    exchange_time: 0,
                 }))
             });
             result
@@ -106,6 +108,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                     cents: price_to_cents(price),
                     size: price * size,
                     side: side,
+                    exchange_time: 0,
                 })
             })
             .collect(),

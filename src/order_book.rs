@@ -74,13 +74,13 @@ impl SidedPrice for SellPrice {
     fn to_sell(&self) -> SellPrice {
         *self
     }
-
 }
 
 #[derive(Default)]
 pub struct OrderBook {
     bids: BTreeMap<BuyPrice, f64>,
     asks: BTreeMap<SellPrice, f64>,
+    last_update: usize,
 }
 
 impl OrderBook {
@@ -88,6 +88,7 @@ impl OrderBook {
         OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            last_update: 0,
         }
     }
 
@@ -132,7 +133,13 @@ impl OrderBook {
 
     pub fn handle_book_event(&mut self, event: &MarketEvent) -> Option<BBOClearEvent> {
         match event {
-            MarketEvent::Book(BookUpdate { cents, side, size }) => {
+            MarketEvent::Book(BookUpdate {
+                cents,
+                side,
+                size,
+                exchange_time,
+            }) => {
+                self.last_update = *exchange_time;
                 if *size <= 0.000001 {
                     self.delete_level(*cents, *side)
                 } else {

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 struct OrderKey<P: SidedPrice + PartialOrd + Ord> {
     price: P,
-    id: usize
+    id: usize,
 }
 
 pub struct OrderManager {
@@ -48,8 +48,20 @@ impl OrderManager {
         let id = self.current_id;
         self.current_id += 1;
         match P::SIDE {
-            Side::Buy => self.buys.insert(OrderKey {id, price: price.to_buy()}, dollars),
-            Side::Sell => self.sells.insert(OrderKey {id, price: price.to_sell()}, dollars),
+            Side::Buy => self.buys.insert(
+                OrderKey {
+                    id,
+                    price: price.to_buy(),
+                },
+                dollars,
+            ),
+            Side::Sell => self.sells.insert(
+                OrderKey {
+                    id,
+                    price: price.to_sell(),
+                },
+                dollars,
+            ),
         };
         true
     }

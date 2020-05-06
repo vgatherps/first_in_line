@@ -57,6 +57,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                     cents: cents_from_id(update.id),
                     side: update.side,
                     size: update.size as f64,
+                    exchange_time: 0,
                 })
             })
             .collect(),
@@ -67,6 +68,7 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> Vec<normalized::Mar
                     cents: cents_from_id(update.id),
                     side: update.side,
                     size: 0.0,
+                    exchange_time: 0,
                 })
             })
             .collect(),
