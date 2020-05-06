@@ -41,7 +41,7 @@ impl FairValue {
         self.offset + 1.0 / (1.0 + self.denom * distance * distance)
     }
 
-    fn score_distanced<'a, I>(&self, prices: I) -> (f64, f64)
+    fn score_distanced<I>(&self, prices: I) -> (f64, f64)
     where
         I: Iterator<Item = (f64, f64, f64)>,
     {

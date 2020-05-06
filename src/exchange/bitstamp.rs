@@ -48,9 +48,11 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
 
     // wait to get a diff message before we try and request the full book
     // ensure proper ordering
-    let mut first_diff_message = l2_stream.next().await.unwrap().unwrap();
+    let first_diff_message = l2_stream.next().await.unwrap().unwrap();
     let mut seen_diff_messages = vec![convert_ts(first_diff_message, &mut l2_stream, false)];
-    let mut full_response = reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd")
+    // wait 200ms - this seems to help bitstamp
+    tokio::time::delay_for(std::time::Duration::from_millis(100)).await;
+    let full_response = reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd")
         .await
         .unwrap()
         .text()
@@ -62,24 +64,43 @@ pub async fn bitstamp_connection() -> normalized::MarketDataStream {
     // as far as I can tell, only the first awai in the request chain is meaningfully
     // asynchronous.
 
-    let (mut full_diff_update, timestamp) =
+    let (mut full_diff_update, mut timestamp) =
         convert_ts(Message::Text(full_response), &mut l2_stream, true);
     // if the most recent diff is after the book update, abort due to inconsistent
     // state. We know this will have one entry
     let first_diff = seen_diff_messages[0].1;
-    if timestamp < first_diff {
-        panic!(
-            "Got diffs only after bookupdate: {}, {}",
-            timestamp, first_diff
-        );
+    let mut tries_count: usize = 0;
+    while timestamp < first_diff {
+        if tries_count > 4 {
+            panic!("Unable to get reasonably timestamped order book");
+        }
+
+        tries_count += 1;
+
+        // wait 200ms and try again
+        tokio::time::delay_for(std::time::Duration::from_millis(100)).await;
+
+        let full_response =
+            reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd?group=2")
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+
+        let (new_full_diff_update, new_timestamp) =
+            convert_ts(Message::Text(full_response), &mut l2_stream, true);
+        full_diff_update = new_full_diff_update;
+        timestamp = new_timestamp;
     }
+    real_update_vec.extend(full_diff_update);
     // wait until we have some late-enough updates to ensure
     // we ditch all of the early ones
     while seen_diff_messages[seen_diff_messages.len() - 1].1 < timestamp {
         let diff_message = l2_stream.next().await.unwrap().unwrap();
         seen_diff_messages.push(convert_ts(diff_message, &mut l2_stream, false));
     }
-    for (mut diff, diff_timestamp) in seen_diff_messages {
+    for (diff, diff_timestamp) in seen_diff_messages {
         if diff_timestamp < timestamp {
             continue;
         }

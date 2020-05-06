@@ -34,7 +34,6 @@ async fn get_bitstamp_stream(which: &str) -> normalized::DataStream {
     let (mut stream, _) = connect_async("wss://ws.bitstamp.net/")
         .await
         .expect("Could not connect to bitstamp api");
-    println!("Connected to bitstamp");
     // What comes first
     let msg = Message::Text(format!(
         "{{
@@ -59,38 +58,57 @@ pub async fn bitstamp_orders_connection() -> normalized::MarketDataStream {
     let mut order_stream = get_bitstamp_stream("live_orders_btcusd").await;
     // wait to get a diff message before we try and request the full book
     // ensure proper ordering
-    let mut first_diff_message = order_stream.next().await.unwrap().unwrap();
+    let first_diff_message = order_stream.next().await.unwrap().unwrap();
     let mut seen_diff_messages = vec![convert_inner(first_diff_message)];
-    let mut full_response =
-        reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd&group=2")
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
+    // wait 200ms - this seems to help bitstamp
+    tokio::time::delay_for(std::time::Duration::from_millis(100)).await;
+    let full_response = reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd?group=2")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
     let mut real_update_vec = vec![normalized::MarketEvent::Clear];
 
     // as far as I can tell, only the first await in the request chain is meaningfully
     // asynchronous.
 
-    let (mut full_diff_update, timestamp) = convert_snapshot(&full_response);
-    // if the most recent diff is after the book update, abort due to inconsistent
-    // state. We know this will have one entry
+    let (mut full_diff_update, mut timestamp) = convert_snapshot(&full_response);
+    // if the most recent diff is after the book update, we retry loading the book
     let first_diff = seen_diff_messages[0].1;
-    if timestamp < first_diff {
-        panic!(
-            "Got diffs only after bookupdate: {}, {}",
-            timestamp, first_diff
-        );
+    let mut tries_count: usize = 0;
+    while timestamp < first_diff {
+        if tries_count > 4 {
+            panic!("Unable to get reasonably timestamped order book");
+        }
+
+        tries_count += 1;
+
+        // wait 200ms and try again
+        tokio::time::delay_for(std::time::Duration::from_millis(100)).await;
+
+        let full_response =
+            reqwest::get("https://www.bitstamp.net/api/v2/order_book/btcusd?group=2")
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+
+        let (new_full_diff_update, new_timestamp) = convert_snapshot(&full_response);
+        full_diff_update = new_full_diff_update;
+        timestamp = new_timestamp;
     }
+
+    real_update_vec.extend(full_diff_update);
     // wait until we have some late-enough updates to ensure
     // we ditch all of the early ones
     while seen_diff_messages[seen_diff_messages.len() - 1].1 < timestamp {
         let diff_message = order_stream.next().await.unwrap().unwrap();
         seen_diff_messages.push(convert_inner(diff_message));
     }
-    for (mut diff, diff_timestamp) in seen_diff_messages {
+    for (diff, diff_timestamp) in seen_diff_messages {
         if diff_timestamp < timestamp {
             continue;
         }
@@ -118,7 +136,7 @@ fn convert_inner(data: Message) -> (Vec<normalized::MarketEvent>, usize) {
         Message::Ping(_) => return (Vec::new(), 0),
         other => panic!("Got bogus message: {:?}", other),
     };
-    let OrderWrapper { data } = serde_json::from_str(&data).expect("Couldn't parse snapshot");
+    let OrderWrapper { data } = serde_json::from_str(&data).expect("Couldn't parse order");
     let Order {
         microtimestamp,
         id,
@@ -156,22 +174,30 @@ fn convert_snapshot(data: &str) -> (Vec<normalized::MarketEvent>, usize) {
     bids.iter().for_each(|[price, size, id]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
-            cents: price_to_cents(price),
-            side: normalized::Side::Buy,
-            size: price * size,
-            exchange_time: ts,
-        }))
+        let id: usize = id.parse().expect("Bad integer id");
+        result.push(normalized::MarketEvent::OrderUpdate(
+            normalized::OrderUpdate {
+                cents: price_to_cents(price),
+                side: normalized::Side::Buy,
+                size: price * size,
+                exchange_time: ts,
+                order_id: id,
+            },
+        ))
     });
     asks.iter().for_each(|[price, size, id]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
-            cents: price_to_cents(price),
-            side: normalized::Side::Sell,
-            size: price * size,
-            exchange_time: ts,
-        }))
+        let id: usize = id.parse().expect("Bad integer id");
+        result.push(normalized::MarketEvent::OrderUpdate(
+            normalized::OrderUpdate {
+                cents: price_to_cents(price),
+                side: normalized::Side::Sell,
+                size: price * size,
+                exchange_time: ts,
+                order_id: id,
+            },
+        ))
     });
     (result, ts)
 }

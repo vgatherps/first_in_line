@@ -16,3 +16,4 @@ futures = "*"
 flate2 = "*"
 horrorshow = "0.8.3"
 reqwest = { version = "0.10", features = ["json"] }
+itertools = "0.9"
