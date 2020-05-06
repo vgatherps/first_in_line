@@ -2,6 +2,7 @@ use crate::exchange::{normalized, normalized::SmallVec};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
+type SmallString = smallstr::SmallString<[u8; 64]>;
 
 fn price_to_cents(price: f64) -> usize {
     (price * 100.0).round() as usize
@@ -9,18 +10,11 @@ fn price_to_cents(price: f64) -> usize {
 
 #[derive(Deserialize, Debug)]
 struct Order {
-    microtimestamp: String,
+    microtimestamp: SmallString,
     id: usize,
     order_type: usize,
     amount: f64,
     price: f64,
-}
-
-#[derive(Deserialize, Debug)]
-struct Snapshot {
-    microtimestamp: String,
-    bids: SmallVec<[String; 3]>,
-    asks: SmallVec<[String; 3]>,
 }
 
 #[derive(Deserialize, Debug)]

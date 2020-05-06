@@ -17,3 +17,4 @@ flate2 = "*"
 horrorshow = "0.8.3"
 reqwest = { version = "0.10", features = ["json"] }
 smallvec = { version = "1.4", features = ["serde"] }
+smallstr = { version = "0.2", features = ["serde"] }

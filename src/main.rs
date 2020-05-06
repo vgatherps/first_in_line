@@ -37,15 +37,6 @@ pub enum TacticEventType {
     InsideOrders(SmallVec<local_book::InsideOrder>),
 }
 
-impl TacticEventType {
-    fn tactic_check_orders(&self) -> bool {
-        match self {
-            TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => true,
-            TacticEventType::InsideOrders(_) => false,
-        }
-    }
-}
-
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bitstamp = bitstamp_connection();
     let bitstamp_orders = bitstamp_orders_connection();
@@ -56,7 +47,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (bitmex, okex_spot, okex_swap, mut bitstamp, mut bitstamp_orders) =
         join!(bitmex, okex_spot, okex_swap, bitstamp, bitstamp_orders);
 
-    let remote_fair_value = FairValue::new(1.1, 0.0, 5.0, 10);
+    let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
+    let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
 
     let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
         bitmex,
@@ -66,7 +58,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         0.001,
     );
 
-    let mut local_book = local_book::LocalBook::new(remote_fair_value);
+    let mut local_book = local_book::LocalBook::new(local_fair_value);
 
     let mut displacement = displacement::Displacement::new();
 

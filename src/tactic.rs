@@ -13,7 +13,7 @@ impl Tactic {
         Tactic {
             update_count: 1,
             required_profit: 0.01 * 0.02,
-            required_fees: 0.01 * 0.05,
+            required_fees: 0.01 * 0.03,
             imbalance_adjust: 0.2,
         }
     }
