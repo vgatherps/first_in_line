@@ -1,4 +1,4 @@
-use crate::order_book::{BuyPrice, SellPrice};
+use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 
 #[derive(Default)]
 pub struct FairValueResult {

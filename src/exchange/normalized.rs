@@ -1,10 +1,6 @@
-use async_tungstenite::{
-    stream::Stream as ATStream, tokio::TokioAdapter, tungstenite::Message, WebSocketStream,
-};
+use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio_tls::TlsStream;
 
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
 
@@ -25,6 +21,15 @@ pub enum Exchange {
 pub enum Side {
     Buy,
     Sell,
+}
+
+impl Side {
+    pub fn flip(self) -> Self {
+        match self {
+            Side::Buy => Side::Sell,
+            Side::Sell => Side::Buy,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]

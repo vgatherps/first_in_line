@@ -19,42 +19,62 @@ pub struct SellPrice {
     value: i64,
 }
 
+pub trait SidedPrice {
+    const SIDE: Side;
+    fn unsigned(&self) -> usize;
+    fn to_sell(&self) -> SellPrice;
+    fn to_buy(&self) -> BuyPrice;
+}
+
 impl BuyPrice {
-    fn new(price: usize) -> BuyPrice {
+    pub fn new(price: usize) -> BuyPrice {
         BuyPrice {
             value: price as i64 * -1,
         }
     }
+}
 
-    fn flip(&self) -> SellPrice {
+impl SidedPrice for BuyPrice {
+    const SIDE: Side = Side::Buy;
+    fn unsigned(&self) -> usize {
+        assert!(self.value <= 0);
+        (self.value * -1) as usize
+    }
+    fn to_buy(&self) -> BuyPrice {
+        *self
+    }
+    fn to_sell(&self) -> SellPrice {
         SellPrice {
             value: self.value * -1,
         }
     }
-
-    pub fn unsigned(&self) -> usize {
-        assert!(self.value <= 0);
-        (self.value * -1) as usize
-    }
 }
 
 impl SellPrice {
-    fn new(price: usize) -> SellPrice {
+    pub fn new(price: usize) -> SellPrice {
         SellPrice {
             value: price as i64,
         }
     }
+}
 
-    fn flip(&self) -> BuyPrice {
+impl SidedPrice for SellPrice {
+    const SIDE: Side = Side::Sell;
+    fn unsigned(&self) -> usize {
+        assert!(self.value >= 0);
+        self.value as usize
+    }
+
+    fn to_buy(&self) -> BuyPrice {
         BuyPrice {
             value: self.value * -1,
         }
     }
 
-    pub fn unsigned(&self) -> usize {
-        assert!(self.value >= 0);
-        self.value as usize
+    fn to_sell(&self) -> SellPrice {
+        *self
     }
+
 }
 
 #[derive(Default)]

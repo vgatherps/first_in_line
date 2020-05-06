@@ -1,6 +1,4 @@
-use exchange::{
-    bitmex_connection, bitstamp_connection, okex_connection, OkexType,
-};
+use exchange::{bitmex_connection, bitstamp_connection, okex_connection, OkexType};
 
 use futures::{future::FutureExt, join, select};
 
@@ -10,6 +8,7 @@ mod exchange;
 mod fair_value;
 mod local_book;
 mod order_book;
+mod order_manager;
 mod remote_venue_aggregator;
 mod tactic;
 
