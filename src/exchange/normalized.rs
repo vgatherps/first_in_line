@@ -79,7 +79,6 @@ pub struct MarketEventBlock {
 pub struct MarketDataStream {
     stream: DataStream,
     exchange: Exchange,
-    initial_events: Option<Vec<MarketEvent>>,
     operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
 }
 
@@ -89,19 +88,9 @@ impl MarketDataStream {
         exchange: Exchange,
         operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
     ) -> MarketDataStream {
-        Self::new_with(stream, exchange, vec![], operator)
-    }
-
-    pub fn new_with(
-        stream: DataStream,
-        exchange: Exchange,
-        events: Vec<MarketEvent>,
-        operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
-    ) -> MarketDataStream {
         MarketDataStream {
             stream,
             exchange,
-            initial_events: if events.len() > 0 { Some(events) } else { None },
             operator,
         }
     }
@@ -109,15 +98,6 @@ impl MarketDataStream {
     // TODO handle failure gracefully, possibly try reconnecting?
     // just have a stream reconnection callback possibly.
     pub async fn next(&mut self) -> MarketEventBlock {
-        if let Some(events) = self.initial_events.replace(vec![]) {
-            self.initial_events = None;
-            if events.len() > 0 {
-                return MarketEventBlock {
-                    events: events.into_iter().collect(),
-                    exchange: self.exchange,
-                };
-            }
-        }
         let op = self.operator;
         loop {
             let received: Message = self

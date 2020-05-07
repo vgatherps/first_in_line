@@ -8,6 +8,9 @@ pub struct Arguments {
     #[structopt(long, help = "Bitstamp authentication secret")]
     pub auth_secret: String,
 
+    #[structopt(long, help = "HTML summary file output")]
+    pub html: String,
+
     #[structopt(long, default_value = "0.03", help = "Fee per making trades in bps")]
     pub fee_bps: f64,
 
