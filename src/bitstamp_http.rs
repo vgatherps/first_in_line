@@ -1,6 +1,7 @@
 use hmac::{Hmac, Mac};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sha2::Sha256;
+use std::sync::atomic::{AtomicUsize, Ordering};
 type HmacSha256 = Hmac<Sha256>;
 type SmallString = smallstr::SmallString<[u8; 32]>;
 
@@ -31,6 +32,15 @@ struct InnerTransaction {
     tr_type: SmallString,
 }
 
+struct Transaction {
+    id: usize,
+    order_id: usize,
+    usd: f64,
+    btc: f64,
+    btc_usd: f64,
+    fee: f64,
+}
+
 pub struct BitstampHttp {
     http_client: reqwest::Client,
     auth_key: String,
@@ -38,7 +48,7 @@ pub struct BitstampHttp {
     x_auth_sig: HeaderName,
     x_auth_nonce: HeaderName,
     x_auth_timestamp: HeaderName,
-    request_counter: usize,
+    request_counter: AtomicUsize,
 }
 
 impl BitstampHttp {
@@ -61,25 +71,22 @@ impl BitstampHttp {
             x_auth_nonce: HeaderName::from_static("x-auth-nonce"),
             x_auth_sig: HeaderName::from_static("x-auth-signature"),
             x_auth_timestamp: HeaderName::from_static("x-auth-timestamp"),
-            request_counter: 0,
+            request_counter: AtomicUsize::new(1),
         }
     }
 
     // TODO TODO TODO this can all be precomputed
     fn generate_request_headers_v2(
-        &mut self,
+        &self,
         payload: &str,
         time: u128,
         verb: &'static str,
         path: &'static str,
         query: &str,
     ) -> HeaderMap {
-        self.request_counter += 1;
+        let counter = self.request_counter.fetch_add(1, Ordering::Relaxed);
         let timestr = format!("{}", time);
-        let nonce = format!(
-            "{}{}000000000000000000000000000000000000",
-            self.request_counter, timestr
-        );
+        let nonce = format!("{}{}000000000000000000000000000000000000", counter, timestr);
         let nonce_36 = &nonce.as_bytes()[..36];
 
         let nonce_value = HeaderValue::from_bytes(nonce_36).unwrap();
@@ -120,13 +127,13 @@ impl BitstampHttp {
         new_headers
     }
 
-    fn generate_v1_signature(&mut self) -> (String, String) {
-        self.request_counter += 1;
+    fn generate_v1_signature(&self) -> (String, String) {
+        let counter = self.request_counter.fetch_add(1, Ordering::Relaxed);
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_millis();
-        let nonce_str = format!("{}{}", self.request_counter, time);
+        let nonce_str = format!("{}{}", counter, time);
         let mac_str = format!("{}jwhf0251{}", nonce_str, self.auth_key);
         let mut mac =
             HmacSha256::new_varkey(self.auth_secret.as_bytes()).expect("Mac works with any key");
@@ -136,7 +143,7 @@ impl BitstampHttp {
         (hex_str, nonce_str)
     }
 
-    pub async fn cancel_all(&mut self) {
+    pub async fn cancel_all(&self) {
         let (sig, nonce) = self.generate_v1_signature();
         let res = self
             .http_client
@@ -151,7 +158,7 @@ impl BitstampHttp {
         res.text().await.unwrap();
     }
 
-    pub async fn request_positions(&mut self) -> (f64, f64, f64) {
+    pub async fn request_positions(&self) -> (f64, f64, f64) {
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -187,7 +194,7 @@ impl BitstampHttp {
         )
     }
 
-    pub async fn request_initial_transaction(&mut self) -> usize {
+    pub async fn request_initial_transaction(&self) -> usize {
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -226,5 +233,51 @@ impl BitstampHttp {
             );
         }
         initial[0].id
+    }
+
+    pub async fn request_transactions_from(&self, from_id: usize) -> Vec<Transaction> {
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+
+        let mut result = self
+            .http_client
+            .post("https://www.bitstamp.net/api/v2/user_transactions/btcusd/")
+            .form(&[("limit", "1")])
+            .build()
+            .unwrap();
+
+        let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
+
+        let headers = self.generate_request_headers_v2(
+            body,
+            time,
+            "POST",
+            "/api/v2/user_transactions/btcusd/",
+            "",
+        );
+
+        let res_headers = result.headers_mut();
+        for (name, val) in headers {
+            res_headers.insert(name.unwrap(), val);
+        }
+
+        let result = self.http_client.execute(result).await.unwrap();
+        assert!(result.status().is_success());
+        let result = result.text().await.unwrap();
+        let transactions: Vec<InnerTransaction> = serde_json::from_str(&result).unwrap();
+        transactions
+            .into_iter()
+            .filter(|t| t.tr_type == "2" && t.id != from_id)
+            .map(|it| Transaction {
+                id: it.id,
+                order_id: it.order_id,
+                usd: it.usd.parse().unwrap(),
+                btc: it.btc.parse().unwrap(),
+                btc_usd: it.btc_usd,
+                fee: it.fee.parse().unwrap(),
+            })
+            .collect()
     }
 }

@@ -12,7 +12,7 @@ pub struct PositionManager {
 }
 
 impl PositionManager {
-    pub async fn create(http: &mut BitstampHttp) -> PositionManager {
+    pub async fn create(http: &BitstampHttp) -> PositionManager {
         http.cancel_all().await;
         let (coins_balance, dollars_balance, fee) = http.request_positions().await;
         PositionManager {

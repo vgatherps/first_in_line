@@ -1,4 +1,7 @@
 use crate::ema::Ema;
+use horrorshow::helper::doctype;
+use horrorshow::html;
+use horrorshow::prelude::*;
 
 // What's the algorithm?
 // Look at the displacement of a fast ema of fair price from a slower ema of fair
@@ -16,7 +19,7 @@ impl Displacement {
     pub fn new() -> Displacement {
         Displacement {
             remote_fast_ema: Ema::new(0.025),
-            remote_slow_ema: Ema::new(0.005),
+            remote_slow_ema: Ema::new(0.001),
             local_fast_ema: Ema::new(0.05),
             local_slow_ema: Ema::new(0.01),
             premium_ema: Ema::new(0.0005),
@@ -53,5 +56,45 @@ impl Displacement {
         } else {
             None
         }
+    }
+
+    pub fn get_html_info(&self) -> String {
+        let (momentum_disp, prem) = self.get_displacement().unwrap_or((0.0, 0.0));
+        let (estimated_current, imbalance) = if let (Some(remote), Some(local)) = (
+            self.remote_fast_ema.get_value(),
+            self.local_fast_ema.get_value(),
+        ) {
+            (local - remote, prem - (local - remote))
+        } else {
+            (0.0, 0.0)
+        };
+        format!(
+            "{}",
+            html! {
+                h3(id="displacement header", class="title") : "Price displacement summary";
+                ul(id="Displacements") {
+                    li(first?=true, class="item") {
+                        : format!("Remote fair emas: fast {:.2}, slow {:.2}",
+                                  self.remote_fast_ema.get_value_zero(),
+                                  self.remote_slow_ema.get_value_zero());
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Local fair emas: fast {:.2}, slow {:.2}",
+                                  self.local_fast_ema.get_value_zero(),
+                                  self.local_slow_ema.get_value_zero());
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Momentum displacement: remote: {:.2}, local: {:.2}, local-to-remote: {:.3}",
+                                  self.remote_fast_ema.get_value_zero() - self.remote_slow_ema.get_value_zero(),
+                                  self.local_fast_ema.get_value_zero() - self.local_slow_ema.get_value_zero(),
+                                  momentum_disp);
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Fair premium: {:.2}, current: {:.3}, imbalance: {:.3}",
+                                  prem, estimated_current, imbalance);
+                    }
+                }
+            }
+        )
     }
 }

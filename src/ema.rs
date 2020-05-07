@@ -20,6 +20,10 @@ impl Ema {
         self.value
     }
 
+    pub fn get_value_zero(&self) -> f64 {
+        self.value.unwrap_or(0.0)
+    }
+
     pub fn add_value(&mut self, new_value: f64) -> f64 {
         let new_result = match self.value {
             Some(value) => {

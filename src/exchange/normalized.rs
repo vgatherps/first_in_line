@@ -118,17 +118,11 @@ impl MarketDataStream {
         }
     }
 
-    // TODO handle failure gracefully, possibly try reconnecting?
-    // just have a stream reconnection callback possibly.
     pub async fn next(&mut self) -> MarketEventBlock {
         let op = self.operator;
         loop {
-            let received = self
-                .stream
-                .next()
-                .await
-                .expect("Market data stream died unexpectedly");
-            if let Ok(received) = received {
+            let received = self.stream.next().await;
+            if let Some(Ok(received)) = received {
                 let events = op(received, &mut self.stream);
                 if events.len() > 0 {
                     return MarketEventBlock {
@@ -140,11 +134,18 @@ impl MarketDataStream {
                 if self.num_created > 10 {
                     panic!("Had to recreate stream too many times");
                 }
-                println!(
-                    "Had to recreate {:?}, done so {} times alread",
-                    self.exchange, self.num_created
-                );
                 self.num_created += 1;
+                println!(
+                    "Had to recreate {:?}, this is {} time. Waiting for {} ms",
+                    self.exchange,
+                    self.num_created,
+                    self.num_created * 500
+                );
+                tokio::time::delay_for(std::time::Duration::from_millis(
+                    500 * self.num_created as u64,
+                ))
+                .await;
+                let _ = self.stream.close(None).await;
                 self.stream = lookup_stream(self.exchange).await
             }
         }

@@ -2,6 +2,8 @@ use crate::exchange::normalized::*;
 use crate::fair_value::FairValue;
 use crate::order_book::*;
 
+use horrorshow::html;
+
 pub struct LocalBook {
     fair: FairValue,
     tob: Option<(((usize, f64), (usize, f64)), f64)>,
@@ -89,5 +91,48 @@ impl LocalBook {
             Side::Sell => (ord.insert_price as i64),
         });
         events
+    }
+
+    pub fn get_html_info(&self) -> String {
+        if let Some((((bprice, bsize), (aprice, asize)), fair)) = self.tob {
+            let mut inside_bids: Vec<_> = self
+                .seen_inside
+                .iter()
+                .filter(|(_, side)| *side == Side::Buy)
+                .map(|(price, _)| *price)
+                .collect();
+            let mut inside_asks: Vec<_> = self
+                .seen_inside
+                .iter()
+                .filter(|(_, side)| *side == Side::Sell)
+                .map(|(price, _)| *price)
+                .collect();
+            inside_bids.sort();
+            inside_asks.sort();
+            format!(
+                "{}",
+                html! {
+                    h3(id="remote heading", class="title") : "Remote fair value summary";
+                    ul(id="Local book info") {
+                        li(first?=true, class="item") {
+                            : format!("Local bbo: ({:.2}, {:.2})x({:.2}, {:.2}), fair {:.2}",
+                                      bprice as f64 * 0.01, bsize,
+                                      aprice as f64 * 0.01, asize,
+                                      fair);
+                        }
+                        li(first?=true, class="item") {
+                            : format!("Bids inside spread: {:?}",
+                                      inside_bids.iter().rev().map(|prc| *prc as f64 * 0.01).collect::<Vec<_>>());
+                        }
+                        li(first?=true, class="item") {
+                            : format!("Asks inside spread: {:?}",
+                                      inside_asks.iter().map(|prc| *prc as f64 * 0.01).collect::<Vec<_>>());
+                        }
+                    }
+                }
+            )
+        } else {
+            String::new()
+        }
     }
 }

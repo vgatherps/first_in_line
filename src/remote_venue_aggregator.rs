@@ -4,7 +4,6 @@ use crate::fair_value::{FairValue, FairValueResult};
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, select};
 
-use horrorshow::helper::doctype;
 use horrorshow::html;
 use horrorshow::prelude::*;
 
@@ -79,29 +78,31 @@ impl RemoteVenueAggregator {
     }
 
     pub fn get_exchange_description(&self, exch: Exchange) -> String {
-        "".into()
+        format!(
+            "fair value: {:.2}, fair size: {:.0}",
+            self.fairs[exch as usize],
+            self.size_ema[exch as usize].get_value().unwrap_or(0.0)
+        )
     }
 
     pub fn get_html_info(&self) -> String {
         format!(
             "{}",
             html! {
-                : doctype::HTML;
-                html {
-                    body {
-                        // attributes
-                        h2(id="heading", class="title") : "Remote fair value summary";
-                        ol(id="Fair values") {
-                            li(first?=true, class="item") {
-                                : format!("Bitmex: {}", self.get_exchange_description(Exchange::Bitmex))
-                            }
-                            li(first?=false, class="item") {
-                                : format!("OkexSpot: {}", self.get_exchange_description(Exchange::OkexSpot))
-                            }
-                            li(first?=false, class="item") {
-                                : format!("OkexSwap: {}", self.get_exchange_description(Exchange::OkexSwap))
-                            }
-                        }
+                // attributes
+                h3(id="remote heading", class="title") : "Remote fair value summary";
+                ul(id="Fair values") {
+                    li(first?=true, class="item") {
+                        : format!("Bitmex    : {}", self.get_exchange_description(Exchange::Bitmex))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("OkexSpot: {}", self.get_exchange_description(Exchange::OkexSpot))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("OkexSwap: {}", self.get_exchange_description(Exchange::OkexSwap))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Fair value: {}", self.calculate_fair().unwrap_or(0.0))
                     }
                 }
             }
