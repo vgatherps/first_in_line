@@ -14,6 +14,7 @@ pub enum Exchange {
     // Non-used by remote exchanges go below here
     COUNT,
     Bitstamp,
+    BitstampOrders,
     Coinbase,
     OkexQuarterly,
 }
@@ -80,6 +81,27 @@ pub struct MarketDataStream {
     stream: DataStream,
     exchange: Exchange,
     operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
+    num_created: usize,
+}
+
+async fn lookup_stream(exchange: Exchange) -> DataStream {
+    match exchange {
+        Exchange::Bitmex => crate::exchange::bitmex_connection().await,
+        Exchange::OkexSpot => {
+            crate::exchange::okex_connection(crate::exchange::okex::OkexType::Spot).await
+        }
+        Exchange::OkexSwap => {
+            crate::exchange::okex_connection(crate::exchange::okex::OkexType::Swap).await
+        }
+        Exchange::OkexQuarterly => {
+            crate::exchange::okex_connection(crate::exchange::okex::OkexType::Quarterly).await
+        }
+        Exchange::Bitstamp => crate::exchange::bitstamp_connection().await,
+        Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
+        Exchange::Coinbase => crate::exchange::coinbase_connection().await,
+        Exchange::COUNT => panic!("Not valid to do this lookup"),
+    }
+    .stream
 }
 
 impl MarketDataStream {
@@ -92,6 +114,7 @@ impl MarketDataStream {
             stream,
             exchange,
             operator,
+            num_created: 0,
         }
     }
 
@@ -100,18 +123,29 @@ impl MarketDataStream {
     pub async fn next(&mut self) -> MarketEventBlock {
         let op = self.operator;
         loop {
-            let received: Message = self
+            let received = self
                 .stream
                 .next()
                 .await
-                .expect("Market data stream died unexpectedly")
-                .expect("Couldn't get valid websockets message");
-            let events = op(received, &mut self.stream);
-            if events.len() > 0 {
-                return MarketEventBlock {
-                    events,
-                    exchange: self.exchange,
-                };
+                .expect("Market data stream died unexpectedly");
+            if let Ok(received) = received {
+                let events = op(received, &mut self.stream);
+                if events.len() > 0 {
+                    return MarketEventBlock {
+                        events,
+                        exchange: self.exchange,
+                    };
+                }
+            } else {
+                if self.num_created > 10 {
+                    panic!("Had to recreate stream too many times");
+                }
+                println!(
+                    "Had to recreate {:?}, done so {} times alread",
+                    self.exchange, self.num_created
+                );
+                self.num_created += 1;
+                self.stream = lookup_stream(self.exchange).await
             }
         }
     }

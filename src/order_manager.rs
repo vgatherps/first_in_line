@@ -78,20 +78,20 @@ impl OrderManager {
                             occ.remove_entry();
                         }
                         true
-                    },
+                    }
                     _ => false,
                 }
             }
             Side::Sell => {
                 let price = price.to_sell();
                 match self.sells.entry(price) {
-                    Entry::Occupied(mut occ) if occ.get().0 == id=> {
+                    Entry::Occupied(mut occ) if occ.get().0 == id => {
                         occ.get_mut().1 -= dollars;
                         if occ.get_mut().1 <= 0.0000001 {
                             occ.remove_entry();
                         }
                         true
-                    },
+                    }
                     _ => false,
                 }
             }

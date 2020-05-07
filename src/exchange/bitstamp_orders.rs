@@ -48,7 +48,7 @@ async fn get_bitstamp_stream(which: &str) -> normalized::DataStream {
 // lol hardcoding
 pub async fn bitstamp_orders_connection() -> normalized::MarketDataStream {
     let order_stream = get_bitstamp_stream("live_orders_btcusd").await;
-    normalized::MarketDataStream::new(order_stream, normalized::Exchange::Bitstamp, convert)
+    normalized::MarketDataStream::new(order_stream, normalized::Exchange::BitstampOrders, convert)
 }
 
 fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
