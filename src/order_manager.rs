@@ -1,18 +1,11 @@
 use crate::exchange::normalized::*;
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 
-use std::collections::BTreeMap;
-
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
-struct OrderKey<P: SidedPrice + PartialOrd + Ord> {
-    price: P,
-    id: usize,
-}
+use std::collections::{btree_map::Entry, BTreeMap};
 
 pub struct OrderManager {
-    buys: BTreeMap<OrderKey<BuyPrice>, f64>,
-    sells: BTreeMap<OrderKey<SellPrice>, f64>,
-    current_id: usize,
+    buys: BTreeMap<BuyPrice, (usize, f64)>,
+    sells: BTreeMap<SellPrice, (usize, f64)>,
 }
 
 impl OrderManager {
@@ -20,7 +13,6 @@ impl OrderManager {
         OrderManager {
             buys: BTreeMap::new(),
             sells: BTreeMap::new(),
-            current_id: 1,
         }
     }
 
@@ -30,13 +22,13 @@ impl OrderManager {
                 .sells
                 .keys()
                 .next()
-                .map(|first| first.price > price.to_sell())
+                .map(|first| *first > price.to_sell())
                 .unwrap_or(true),
             Side::Sell => self
                 .buys
                 .keys()
                 .next()
-                .map(|first| first.price > price.to_buy())
+                .map(|first| *first > price.to_buy())
                 .unwrap_or(true),
         }
     }
@@ -45,25 +37,65 @@ impl OrderManager {
         if !self.can_place_at(price) {
             return false;
         }
-        let id = self.current_id;
-        self.current_id += 1;
         match P::SIDE {
-            Side::Buy => self.buys.insert(
-                OrderKey {
-                    id,
-                    price: price.to_buy(),
-                },
-                dollars,
-            ),
-            Side::Sell => self.sells.insert(
-                OrderKey {
-                    id,
-                    price: price.to_sell(),
-                },
-                dollars,
-            ),
+            Side::Buy => self.buys.insert(price.to_buy(), (0, dollars)),
+            Side::Sell => self.sells.insert(price.to_sell(), (0, dollars)),
         };
         true
+    }
+
+    pub fn give_id<P: SidedPrice>(&mut self, price: &P, id: usize) {
+        assert_ne!(id, 0);
+        match P::SIDE {
+            Side::Buy => {
+                let price = price.to_buy();
+                let order = self.buys.get_mut(&price).unwrap();
+                assert_eq!(order.0, 0);
+                order.0 = id;
+            }
+            Side::Sell => {
+                let price = price.to_sell();
+                let order = self.sells.get_mut(&price).unwrap();
+                assert_eq!(order.0, 0);
+                order.0 = id;
+            }
+        };
+    }
+
+    pub fn remove_liquidity_from<P: SidedPrice>(
+        &mut self,
+        price: &P,
+        dollars: f64,
+        id: usize,
+    ) -> bool {
+        match P::SIDE {
+            Side::Buy => {
+                let price = price.to_buy();
+                match self.buys.entry(price) {
+                    Entry::Occupied(mut occ) if occ.get().0 == id => {
+                        occ.get_mut().1 -= dollars;
+                        if occ.get_mut().1 <= 0.0000001 {
+                            occ.remove_entry();
+                        }
+                        true
+                    },
+                    _ => false,
+                }
+            }
+            Side::Sell => {
+                let price = price.to_sell();
+                match self.sells.entry(price) {
+                    Entry::Occupied(mut occ) if occ.get().0 == id=> {
+                        occ.get_mut().1 -= dollars;
+                        if occ.get_mut().1 <= 0.0000001 {
+                            occ.remove_entry();
+                        }
+                        true
+                    },
+                    _ => false,
+                }
+            }
+        }
     }
 }
 
@@ -87,5 +119,19 @@ mod tests {
         assert!(manager.add_sent_order(&SellPrice::new(11), 10.0));
         assert!(!manager.can_place_at(&BuyPrice::new(11)));
         assert!(!manager.add_sent_order(&BuyPrice::new(11), 10.0));
+    }
+
+    #[test]
+    fn test_remove_liquidity() {
+        let mut manager = OrderManager::new();
+        assert!(manager.add_sent_order(&BuyPrice::new(10), 10.0));
+        manager.give_id(&BuyPrice::new(10), 1);
+        assert!(!manager.add_sent_order(&SellPrice::new(10), 10.0));
+        assert!(manager.remove_liquidity_from(&BuyPrice::new(10), 5.0, 1));
+        assert!(!manager.add_sent_order(&SellPrice::new(10), 10.0));
+        assert!(!manager.remove_liquidity_from(&BuyPrice::new(10), 5.0, 2));
+        assert!(!manager.add_sent_order(&SellPrice::new(10), 10.0));
+        assert!(manager.remove_liquidity_from(&BuyPrice::new(10), 5.0, 1));
+        assert!(manager.add_sent_order(&SellPrice::new(10), 10.0));
     }
 }

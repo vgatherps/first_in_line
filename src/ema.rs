@@ -9,7 +9,11 @@ impl Ema {
     pub fn new(ratio: f64) -> Ema {
         assert!(ratio > 0.0);
         assert!(ratio <= 1.0);
-        Ema { value: None, ratio , cur_ratio: 0.5}
+        Ema {
+            value: None,
+            ratio,
+            cur_ratio: 0.5,
+        }
     }
 
     pub fn get_value(&self) -> Option<f64> {

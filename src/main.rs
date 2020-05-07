@@ -12,7 +12,10 @@ use exchange::{
 use crate::exchange::normalized::*;
 
 use futures::{future::FutureExt, join, select};
+use structopt::StructOpt;
 
+mod args;
+mod bitstamp_http;
 mod displacement;
 mod ema;
 mod exchange;
@@ -20,6 +23,7 @@ mod fair_value;
 mod local_book;
 mod order_book;
 mod order_manager;
+mod position_manager;
 mod remote_venue_aggregator;
 mod tactic;
 
@@ -30,14 +34,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     rt.block_on(run())
 }
 
-#[derive(Debug)]
-pub enum TacticEventType {
+enum TacticTimerEvent {
+    CheckTransactionsFrom(usize),
+    CheckOpenOrders,
+    DisplayHtml,
+    OrderCanCancel,
+}
+
+enum TacticInternalEvent {
+    TransactionsDataReceived,
+    OpenOrdersDataReceived,
+}
+
+enum TacticEventType {
     RemoteFair,
     LocalBook(SmallVec<MarketEvent>),
     InsideOrders(SmallVec<local_book::InsideOrder>),
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args = args::Arguments::from_args();
+
+    let mut http = bitstamp_http::BitstampHttp::new(args.auth_key, args.auth_secret);
+    http.request_initial_transaction().await;
+    let pos = position_manager::PositionManager::create(&mut http).await;
+    println!("Position manager is: {:?}", pos);
+
     let bitstamp = bitstamp_connection();
     let bitstamp_orders = bitstamp_orders_connection();
     let bitmex = bitmex_connection();
@@ -62,7 +84,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut displacement = displacement::Displacement::new();
 
-    let mut tactic = tactic::Tactic::new();
+    let mut tactic = tactic::Tactic::new(args.profit_bps, args.fee_bps);
 
     loop {
         let event_type = select! {

@@ -9,11 +9,11 @@ pub struct Tactic {
 }
 
 impl Tactic {
-    pub fn new() -> Tactic {
+    pub fn new(profit_bps: f64, fee_bps: f64) -> Tactic {
         Tactic {
             update_count: 1,
-            required_profit: 0.01 * 0.02,
-            required_fees: 0.01 * 0.03,
+            required_profit: 0.01 * profit_bps,
+            required_fees: 0.01 * fee_bps,
             imbalance_adjust: 0.2,
         }
     }
@@ -45,7 +45,7 @@ impl Tactic {
         let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
         let diff = prc - around;
         let diff = diff.min(30.0).max(-30.0);
-        let diff =  (diff + imbalance_adjustment) * dir_mult;
+        let diff = (diff + imbalance_adjustment) * dir_mult;
         if diff >= required_diff {
             println!(
                 "Would chase new order price {:.2}, side {:?}, {:.2}x{:.2}, around {:.2}, imbalance_adjust {:.3}, req {:.3}, diff {:.3}",
@@ -69,12 +69,24 @@ impl Tactic {
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
-            self.consider_order_placement(bbo, adjusted_fair, premium_imbalance, buy_prc, Side::Buy);
+            self.consider_order_placement(
+                bbo,
+                adjusted_fair,
+                premium_imbalance,
+                buy_prc,
+                Side::Buy,
+            );
         }
         if let Some(first_sell) = orders.iter().filter(|o| o.side == Side::Sell).next() {
             assert!(first_sell.side == Side::Sell);
             let sell_prc = first_sell.insert_price as f64 * 0.01;
-            self.consider_order_placement(bbo, adjusted_fair, premium_imbalance, sell_prc, Side::Sell);
+            self.consider_order_placement(
+                bbo,
+                adjusted_fair,
+                premium_imbalance,
+                sell_prc,
+                Side::Sell,
+            );
         }
     }
 }

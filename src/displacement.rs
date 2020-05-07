@@ -15,10 +15,10 @@ pub struct Displacement {
 impl Displacement {
     pub fn new() -> Displacement {
         Displacement {
-            remote_fast_ema: Ema::new(0.05),
+            remote_fast_ema: Ema::new(0.025),
             remote_slow_ema: Ema::new(0.005),
-            local_fast_ema: Ema::new(0.1),
-            local_slow_ema: Ema::new(0.02),
+            local_fast_ema: Ema::new(0.05),
+            local_slow_ema: Ema::new(0.01),
             premium_ema: Ema::new(0.0005),
         }
     }
