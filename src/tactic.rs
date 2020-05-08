@@ -441,16 +441,16 @@ impl Tactic {
         let price = cents;
         let id = order.id;
         tokio::task::spawn(async move {
-            // first wait 3 seconds, and set cancelable
-            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
+            // first wait 1 seconds, and set cancelable
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 1)).await;
             assert!(sender
                 .send(crate::TacticInternalEvent::SetLateStatus(side, price, id))
                 .await
                 .is_ok());
-            // wait 20ish more seconds, try and cancel order
-            let random_offset = (id * 10353457) % 4;
+            // wait 8ish more seconds, try and cancel order
+            let random_offset = (id / 19) % 4;
             tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * (18 + random_offset) as u64,
+                1000 * (5 + random_offset) as u64,
             ))
             .await;
             assert!(sender
