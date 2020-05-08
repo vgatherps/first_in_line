@@ -239,7 +239,11 @@ impl Tactic {
                 let known_volume = self
                     .order_manager
                     .ack_buy_cancel(BuyPrice::new(cents), cancel.id);
-                assert!(cancel.amount <= known_volume);
+                if cancel.amount > known_volume {
+                    println!("Got buy cancel for {}, only have {}",
+                             cancel.amount, known_volume);
+                    self.reset();
+                }
                 self.position
                     .return_buy_balance(cancel.amount * cancel.price);
             }
@@ -247,10 +251,21 @@ impl Tactic {
                 let known_volume = self
                     .order_manager
                     .ack_sell_cancel(SellPrice::new(cents), cancel.id);
-                assert!(cancel.amount <= known_volume);
+                if cancel.amount > known_volume {
+                    println!("Got sell cancel for {}, only have {}",
+                             cancel.amount, known_volume);
+                    self.reset();
+                }
                 self.position.return_sell_balance(cancel.amount);
             }
         }
+    }
+
+    fn reset(&self) {
+        let mut not = self.main_loop_not.clone();
+        tokio::task::spawn(async move {
+            assert!(not.send(crate::TacticInternalEvent::Reset).await.is_ok());
+        });
     }
 
     fn get_position_imbalance_cost(&self, fair: f64) -> f64 {
