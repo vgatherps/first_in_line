@@ -1,6 +1,6 @@
 use crate::bitstamp_http::BitstampHttp;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PositionManager {
     pub coins_balance: f64,
     pub dollars_balance: f64,

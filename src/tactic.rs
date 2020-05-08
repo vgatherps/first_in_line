@@ -1,4 +1,4 @@
-use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent, Trade, Transaction};
+use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent};
 use crate::exchange::normalized::{convert_price_cents, Side, TradeUpdate};
 use crate::local_book::InsideOrder;
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
@@ -8,8 +8,6 @@ use crate::position_manager::PositionManager;
 use horrorshow::html;
 
 use std::collections::VecDeque;
-
-use std::collections::HashSet;
 
 pub struct Tactic {
     required_profit: f64,
@@ -103,8 +101,7 @@ impl Tactic {
         while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
             let buy_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
-                let cid = self.order_manager.cancel_buy_at(price).unwrap();
-                assert_eq!(cid, id);
+                assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
                 break;
@@ -113,8 +110,7 @@ impl Tactic {
         while let Some((price, id)) = self.order_manager.best_sell_price_cancel() {
             let sell_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, sell_prc, Side::Sell) {
-                let cid = self.order_manager.cancel_sell_at(price).unwrap();
-                assert_eq!(cid, id);
+                assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
                 break;
@@ -122,8 +118,7 @@ impl Tactic {
         }
         while self.order_manager.num_uncanceled_buys() >= self.worry_orders_side {
             if let Some((price, id)) = self.order_manager.worst_buy_price_cancel() {
-                let cid = self.order_manager.cancel_buy_at(price).unwrap();
-                assert_eq!(cid, id);
+                assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
                 break;
@@ -131,8 +126,7 @@ impl Tactic {
         }
         while self.order_manager.num_uncanceled_sells() >= self.worry_orders_side {
             if let Some((price, id)) = self.order_manager.worst_sell_price_cancel() {
-                let cid = self.order_manager.cancel_sell_at(price).unwrap();
-                assert_eq!(cid, id);
+                assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
                 break;
@@ -144,15 +138,13 @@ impl Tactic {
         match side {
             Side::Buy => {
                 let price = BuyPrice::new(price);
-                if let Some(cid) = self.order_manager.cancel_buy_at(price) {
-                    assert_eq!(cid, id);
+                if self.order_manager.cancel_buy_at(price, id) {
                     self.send_buy_cancel_for(id, price);
                 }
             }
             Side::Sell => {
                 let price = SellPrice::new(price);
-                if let Some(cid) = self.order_manager.cancel_sell_at(price) {
-                    assert_eq!(cid, id);
+                if self.order_manager.cancel_sell_at(price, id) {
                     self.send_sell_cancel_for(id, price);
                 }
             }
@@ -393,7 +385,8 @@ impl Tactic {
             // Our purchase succeeded, as far as we know
             self.position.buy_coins(trade.size, dollars);
             self.fees_paid += fee;
-            self.recent_trades.push_front((Side::Buy, dollars, trade.size));
+            self.recent_trades
+                .push_front((Side::Buy, dollars, trade.size));
 
             println!(
                 "Trade buy id {} price {:.2} size {:.5}",
@@ -406,7 +399,8 @@ impl Tactic {
         ) {
             self.position.sell_coins(trade.size, dollars);
             self.fees_paid += fee;
-            self.recent_trades.push_front((Side::Sell, dollars, trade.size));
+            self.recent_trades
+                .push_front((Side::Sell, dollars, trade.size));
             println!(
                 "Trade sell id {} price {:.2} size {:.5}",
                 trade.sell_order_id, dollars, trade.size
@@ -521,7 +515,7 @@ impl Tactic {
                                   imbalance, imbalance * self.cost_of_position);
                     }
                     li(first?=false, class="item") {
-                        : format!("Estimated fee: {:.2}, paid {:.2}", self.position.get_fee_estimate(), self.fees_paid);
+                        : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.fees_paid);
                     }
                     li(first?=false, class="item") {
                         : format!("Orders: sent {}, canceled {}, rate {:.2}",

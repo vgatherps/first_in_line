@@ -132,7 +132,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         args.fee_bps,
         args.cost_of_position,
         position,
-        http,
+        http.clone(),
         event_queue.clone(),
     );
 
@@ -217,6 +217,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {local}
                         {remote}
                         {displacement}
+                        {http}
                         </body>
                         </html>
                         ",
@@ -226,6 +227,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         local = local_book.get_html_info(),
                         remote = remote_agg.get_html_info(),
                         displacement = displacement.get_html_info(),
+                        http = http.get_html_info(),
                     );
                     html_queue.send(html).expect("Couldn't send html");
                 }

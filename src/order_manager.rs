@@ -112,23 +112,27 @@ impl OrderManager {
             .count()
     }
 
-    pub fn cancel_buy_at(&mut self, price: BuyPrice) -> Option<usize> {
+    pub fn cancel_buy_at(&mut self, price: BuyPrice, in_id: usize) -> bool {
         match self.buys.get_mut(&price) {
-            Some((id, _, stat)) if *id != 0 && *stat != CancelStatus::CancelSent => {
+            Some((id, _, stat))
+                if *id != 0 && *stat != CancelStatus::CancelSent && *id == in_id =>
+            {
                 *stat = CancelStatus::CancelSent;
-                Some(*id)
+                true
             }
-            _ => None,
+            _ => false,
         }
     }
 
-    pub fn cancel_sell_at(&mut self, price: SellPrice) -> Option<usize> {
+    pub fn cancel_sell_at(&mut self, price: SellPrice, in_id: usize) -> bool {
         match self.sells.get_mut(&price) {
-            Some((id, _, stat)) if *id != 0 && *stat != CancelStatus::CancelSent => {
+            Some((id, _, stat))
+                if *id != 0 && *stat != CancelStatus::CancelSent && *id == in_id =>
+            {
                 *stat = CancelStatus::CancelSent;
-                Some(*id)
+                true
             }
-            _ => None,
+            _ => false,
         }
     }
 

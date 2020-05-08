@@ -4,6 +4,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 type SmallString = smallstr::SmallString<[u8; 32]>;
+use horrorshow::html;
 
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -79,16 +80,6 @@ pub struct Transaction {
     pub btc: f64,
     pub btc_usd: f64,
     pub fee: f64,
-    pub side: Side,
-}
-
-#[derive(Debug)]
-pub struct Trade {
-    pub id: usize,
-    pub buy_order_id: usize,
-    pub sell_order_id: usize,
-    pub amount: f64,
-    pub price: f64,
     pub side: Side,
 }
 
@@ -230,7 +221,6 @@ impl BitstampHttp {
 
     pub async fn cancel_all(&self) {
         let (sig, nonce) = self.generate_v1_signature();
-        println!("using sig {} nonce {}", sig, nonce);
         let res = self
             .http_client
             .post("https://www.bitstamp.net/api/cancel_all_orders/")
@@ -487,5 +477,20 @@ impl BitstampHttp {
         } else {
             panic!("Got bad order response: {}", result);
         }
+    }
+
+    pub fn get_html_info(&self) -> String {
+        format!(
+            "{}",
+            html! {
+                h3(id="tactic state", class="title") : "Http Client Summary";
+                ul(id="http summary") {
+                    ln(first?=true, class="item") {
+                        :format!("Requests in last 10 min: {}",
+                                 self.outstanding_request_counter.load(Ordering::Relaxed));
+                    }
+                }
+            }
+        )
     }
 }
