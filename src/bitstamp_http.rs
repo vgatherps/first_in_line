@@ -133,10 +133,6 @@ impl BitstampHttp {
         self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
     }
 
-    pub fn recent_outstanding(&self) -> usize {
-        self.outstanding_request_counter.load(Ordering::Relaxed)
-    }
-
     fn decrement_outstanding(&self) {
         self.outstanding_request_counter
             .fetch_sub(1, Ordering::Relaxed);

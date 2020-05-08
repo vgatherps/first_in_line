@@ -45,13 +45,6 @@ impl PositionManager {
         let dollars = coins * price;
         // Here, I do my own fee management to keep things
         let dollars = dollars * (1.0 + self.fee); // when buying, fee is added into dollar charge
-        println!(
-            "Subtracting {} dollars to the account fee {}, db {}, da {}",
-            dollars,
-            dollars * self.fee,
-            self.dollars_balance,
-            self.dollars_available
-        );
         self.coins_balance += coins;
         self.coins_available += coins;
         self.dollars_balance -= dollars;
@@ -63,13 +56,6 @@ impl PositionManager {
         let dollars = dollars * (1.0 - self.fee); // when selling, fee is removed from incoming dollars
         self.coins_balance -= coins;
 
-        println!(
-            "Adding {} dollars to the account fee {}, db {}, da {}",
-            dollars,
-            dollars * self.fee,
-            self.dollars_balance,
-            self.dollars_available
-        );
         self.dollars_available += dollars;
         self.dollars_balance += dollars;
         self.validate();
@@ -80,26 +66,12 @@ impl PositionManager {
     }
 
     pub fn return_buy_balance(&mut self, dollars: f64) {
-        println!(
-            "Returning {} dollars to the account fee {}, db {}, da {}",
-            dollars,
-            self.fee * dollars,
-            self.dollars_balance,
-            self.dollars_available
-        );
         self.dollars_available += dollars * (1.0 + self.fee);
         self.validate();
     }
 
     pub fn request_buy_balance(&mut self, dollars: f64) -> bool {
         if dollars * (1.0 + 2.0 * self.fee) < self.dollars_available {
-            println!(
-                "Requesting {} dollars to the account fee {}, db {}, da {}",
-                dollars,
-                self.fee * dollars,
-                self.dollars_balance,
-                self.dollars_available
-            );
             self.dollars_available -= dollars * (1.0 + self.fee);
             self.validate();
             true

@@ -8,6 +8,7 @@ use crate::position_manager::PositionManager;
 use horrorshow::html;
 
 use std::collections::VecDeque;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Tactic {
     required_profit: f64,
@@ -40,6 +41,8 @@ fn adjust_coins(coins: f64) -> f64 {
     (coins * 10000.0).round() / 10000.0
 }
 
+// TODO should really care about exchange times
+
 async fn order_caller(
     amount: f64,
     price: f64,
@@ -47,7 +50,11 @@ async fn order_caller(
     http: std::sync::Arc<BitstampHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
+    let send = SystemTime::now();
     let sent = http.send_order(amount, price, side, http.clone()).await;
+    if let Ok(diff) = std::time::SystemTime::now().duration_since(send) {
+        println!("Send took {} ms", diff.as_millis())
+    }
     assert!(eventer
         .send(crate::TacticInternalEvent::OrderSent(sent))
         .await
@@ -59,7 +66,11 @@ async fn cancel_caller(
     http: std::sync::Arc<BitstampHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
+    let send = SystemTime::now();
     if let Some(cancel) = http.send_cancel(id, http.clone()).await {
+        if let Ok(diff) = std::time::SystemTime::now().duration_since(send) {
+            println!("Cancel took {} ms", diff.as_millis())
+        }
         assert!(eventer
             .send(crate::TacticInternalEvent::OrderCanceled(cancel))
             .await
@@ -351,7 +362,6 @@ impl Tactic {
             }
             Side::Sell => {
                 let price = SellPrice::new(cents);
-                println!("Pre-ack Sell {:?} prc {}", price, order.price);
                 self.order_manager.give_id(&price, order.id, order.amount);
             }
         }
