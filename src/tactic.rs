@@ -649,13 +649,8 @@ impl Tactic {
         let (desired_d, desired_c) = self.position.get_desired_position(fair);
         let imbalance = self.position.get_position_imbalance(fair);
 
-        let initial_fair = 9875.41;
-
         let initial_dollars = 4679.41;
         let initial_btc = 0.3773;
-
-        let initial_total_dollars = initial_dollars + initial_btc * initial_fair;
-        let initial_total_btc = initial_btc + initial_dollars / initial_fair;
 
         let if_held_dollars = initial_dollars + initial_btc * fair;
         let if_held_btc = initial_btc + initial_dollars / fair;
@@ -676,9 +671,10 @@ impl Tactic {
                                   self.position.dollars_available,self.position.coins_available);
                     }
                     li(first?=true, class="item") {
-                        : format!("Initially: {:.2} total usd, {:.4} total btc. If just held: {:.2}, total usd, {:.4} total btc",
-                                  initial_total_dollars, initial_total_btc,
-                                  if_held_dollars, if_held_btc);
+                        : format!("If just held: {:.2}, total usd, {:.4} total btc. Up {:.2} usd, {:.4} btc",
+                                  if_held_dollars, if_held_btc,
+                                  self.position.get_total_position(fair) - if_held_dollars,
+                                  (self.position.get_total_position(fair) / fair) - if_held_btc);
                     }
                     li(first?=false, class="item") {
                         : format!("Desired: {:.2} usd, {:.4} btc",
