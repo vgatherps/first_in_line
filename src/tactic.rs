@@ -6,6 +6,7 @@ use crate::order_manager::OrderManager;
 use crate::position_manager::PositionManager;
 
 use horrorshow::html;
+use xorshift::{Rng, Xorshift128};
 
 use std::collections::VecDeque;
 use std::time::SystemTime;
@@ -35,6 +36,8 @@ pub struct Tactic {
     order_manager: OrderManager,
 
     position: PositionManager,
+
+    rng: Xorshift128,
 
     main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     http: std::sync::Arc<BitstampHttp>,
@@ -118,6 +121,8 @@ impl Tactic {
             orders_canceled: 0,
             missed_cancels: 0,
             recent_trades: VecDeque::new(),
+            // reproducible seed is fine here, better for sims
+            rng: xorshift::thread_rng(),
             position,
             cost_of_position,
             http,
@@ -368,6 +373,9 @@ impl Tactic {
         if self.orders_sent >= self.max_send {
             return;
         }
+        // shuffle +/ 50 dollars on order size
+        let base_dollars = 200.0 + (self.rng.next_f64() - 0.5) * 100.0;
+        assert!(base_dollars > 100.0);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
@@ -400,7 +408,7 @@ impl Tactic {
                 None
             };
             if let Some(buy_prc) = actual_buy_prc {
-                let buy_coins = adjust_coins(200.0 / buy_prc);
+                let buy_coins = adjust_coins(base_dollars / buy_prc);
                 let buy_dollars = buy_coins * buy_prc;
 
                 if !self
@@ -458,7 +466,7 @@ impl Tactic {
                 None
             };
             if let Some(sell_prc) = actual_sell_prc {
-                let sell_dollars = 200.0;
+                let sell_dollars = base_dollars;
                 let sell_coins = adjust_coins(sell_dollars / sell_prc);
                 if !self
                     .order_manager
