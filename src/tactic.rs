@@ -107,7 +107,13 @@ impl Tactic {
         }
     }
 
-    pub fn handle_book_update(&mut self, fair: f64, adjust: f64, premium_imbalance: f64) {
+    pub fn handle_book_update(
+        &mut self,
+        bbo: (usize, usize),
+        fair: f64,
+        adjust: f64,
+        premium_imbalance: f64,
+    ) {
         let adjusted_fair = fair + adjust;
         while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
             let buy_prc = price.unsigned() as f64 * 0.01;
@@ -125,6 +131,19 @@ impl Tactic {
                 self.send_sell_cancel_for(id, price);
             } else {
                 break;
+            }
+        }
+        let (bid, offer) = (BuyPrice::new(bbo.0), SellPrice::new(bbo.1));
+        while let Some((price, id)) = self.order_manager.best_buy_price_late() {
+            if price > bid && (price.unsigned() - bid.unsigned()) > 2 {
+                assert!(self.order_manager.cancel_buy_at(price, id));
+                self.send_buy_cancel_for(id, price);
+            }
+        }
+        while let Some((price, id)) = self.order_manager.best_sell_price_late() {
+            if price > offer && (offer.unsigned() - price.unsigned()) > 2 {
+                assert!(self.order_manager.cancel_sell_at(price, id));
+                self.send_sell_cancel_for(id, price);
             }
         }
         while self.order_manager.num_uncanceled_buys() >= self.worry_orders_side {
@@ -158,6 +177,19 @@ impl Tactic {
                 if self.order_manager.cancel_sell_at(price, id) {
                     self.send_sell_cancel_for(id, price);
                 }
+            }
+        }
+    }
+
+    pub fn set_late_status(&mut self, id: usize, price: usize, side: Side) {
+        match side {
+            Side::Buy => {
+                let price = BuyPrice::new(price);
+                self.order_manager.set_late_buy_status(price, id);
+            }
+            Side::Sell => {
+                let price = SellPrice::new(price);
+                self.order_manager.set_late_sell_status(price, id);
             }
         }
     }
@@ -370,8 +402,18 @@ impl Tactic {
         let price = cents;
         let id = order.id;
         tokio::task::spawn(async move {
-            // wait 30 seconds, try and cancel order
-            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 30 as u64)).await;
+            // first wait 3 seconds, and set cancelable
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
+            assert!(sender
+                .send(crate::TacticInternalEvent::SetLateStatus(side, price, id))
+                .await
+                .is_ok());
+            // wait 20ish more seconds, try and cancel order
+            let random_offset = (id * 10353457) % 4;
+            tokio::time::delay_for(std::time::Duration::from_millis(
+                1000 * (18 + random_offset) as u64,
+            ))
+            .await;
             assert!(sender
                 .send(crate::TacticInternalEvent::CancelStale(side, price, id))
                 .await
@@ -553,12 +595,12 @@ impl Drop for Tactic {
         while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
             if self.order_manager.cancel_buy_at(price, id) {
                 self.send_buy_cancel_for(id, price);
-            }       
+            }
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_cancel() {
             if self.order_manager.cancel_sell_at(price, id) {
                 self.send_sell_cancel_for(id, price);
-            }       
+            }
         }
     }
 }

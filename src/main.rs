@@ -7,8 +7,7 @@
 
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
-    coinbase_connection,
-    okex_connection, OkexType,
+    coinbase_connection, okex_connection, OkexType,
 };
 
 use crate::exchange::normalized::*;
@@ -57,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 pub enum TacticInternalEvent {
     OrderCanceled(bitstamp_http::OrderCanceled),
     OrderSent(bitstamp_http::OrderSent),
+    SetLateStatus(Side, usize, usize),
     CancelStale(Side, usize, usize),
     DisplayHtml,
 }
@@ -69,6 +69,7 @@ enum TacticEventType {
     AckCancel(bitstamp_http::OrderCanceled),
     AckSend(bitstamp_http::OrderSent),
     CancelStale(Side, usize, usize),
+    SetLateStatus(Side, usize, usize),
     WriteHtml,
 }
 
@@ -103,7 +104,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let okex_quarterly = okex_connection(OkexType::Quarterly);
     let coinbase = coinbase_connection();
 
-    let (bitmex, okex_spot, okex_swap, okex_quarterly, coinbase, mut bitstamp, mut bitstamp_orders, mut bitstamp_trades) = join!(
+    let (
+        bitmex,
+        okex_spot,
+        okex_swap,
+        okex_quarterly,
+        coinbase,
+        mut bitstamp,
+        mut bitstamp_orders,
+        mut bitstamp_trades,
+    ) = join!(
         bitmex,
         okex_spot,
         okex_swap,
@@ -154,6 +164,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
                     Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
                     Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
+                    Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
                     None => panic!("event queue died"),
                 },
             trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
@@ -184,12 +195,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             TacticEventType::CancelStale(side, price, id) => {
                 tactic.cancel_stale_id(*id, *price, *side)
             }
+            TacticEventType::SetLateStatus(side, price, id) => {
+                tactic.set_late_status(*id, *price, *side)
+            }
             TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
             TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
             TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
         }
         if let (
-            Some((_, local_fair)),
+            Some((((bid, _), (offer, _)), local_fair)),
             Some((displacement_val, expected_premium)),
             Some(remote_fair),
         ) = (
@@ -200,7 +214,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let premium = local_fair - remote_fair;
             match &event_type {
                 TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
-                    .handle_book_update(local_fair, displacement_val, premium - expected_premium),
+                    .handle_book_update(
+                        (bid, offer),
+                        local_fair,
+                        displacement_val,
+                        premium - expected_premium,
+                    ),
                 TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
                     local_fair,
                     displacement_val,
@@ -242,6 +261,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 TacticEventType::AckCancel(_)
                 | TacticEventType::AckSend(_)
                 | TacticEventType::CancelStale(_, _, _)
+                | TacticEventType::SetLateStatus(_, _, _)
                 | TacticEventType::Trades(_) => (),
             };
         }

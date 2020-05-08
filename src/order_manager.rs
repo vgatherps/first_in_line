@@ -13,10 +13,16 @@ pub enum CancelStatus {
     CancelSent,
 }
 
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub enum CancelAlone {
+    Early,
+    Able,
+}
+
 #[derive(Debug)]
 pub struct OrderManager {
-    buys: BTreeMap<BuyPrice, (usize, f64, CancelStatus)>,
-    sells: BTreeMap<SellPrice, (usize, f64, CancelStatus)>,
+    buys: BTreeMap<BuyPrice, (usize, f64, CancelStatus, CancelAlone)>,
+    sells: BTreeMap<SellPrice, (usize, f64, CancelStatus, CancelAlone)>,
 }
 
 impl OrderManager {
@@ -54,12 +60,14 @@ impl OrderManager {
             return false;
         }
         match P::SIDE {
-            Side::Buy => self
-                .buys
-                .insert(price.to_buy(), (0, amount, CancelStatus::Open)),
-            Side::Sell => self
-                .sells
-                .insert(price.to_sell(), (0, amount, CancelStatus::Open)),
+            Side::Buy => self.buys.insert(
+                price.to_buy(),
+                (0, amount, CancelStatus::Open, CancelAlone::Early),
+            ),
+            Side::Sell => self.sells.insert(
+                price.to_sell(),
+                (0, amount, CancelStatus::Open, CancelAlone::Early),
+            ),
         };
         true
     }
@@ -67,54 +75,54 @@ impl OrderManager {
     pub fn best_buy_price_cancel(&self) -> Option<(BuyPrice, usize)> {
         self.buys
             .iter()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .next()
-            .map(|(k, (id, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
     pub fn best_sell_price_cancel(&self) -> Option<(SellPrice, usize)> {
         self.sells
             .iter()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .next()
-            .map(|(k, (id, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
     pub fn worst_buy_price_cancel(&self) -> Option<(BuyPrice, usize)> {
         self.buys
             .iter()
             .rev()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .next()
-            .map(|(k, (id, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
     pub fn worst_sell_price_cancel(&self) -> Option<(SellPrice, usize)> {
         self.sells
             .iter()
             .rev()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .next()
-            .map(|(k, (id, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
     pub fn num_uncanceled_buys(&self) -> usize {
         self.buys
             .iter()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .count()
     }
 
     pub fn num_uncanceled_sells(&self) -> usize {
         self.sells
             .iter()
-            .filter(|(_, (id, _, stat))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
             .count()
     }
 
     pub fn cancel_buy_at(&mut self, price: BuyPrice, in_id: usize) -> bool {
         match self.buys.get_mut(&price) {
-            Some((id, _, stat))
+            Some((id, _, stat, _))
                 if *id != 0 && *stat != CancelStatus::CancelSent && *id == in_id =>
             {
                 *stat = CancelStatus::CancelSent;
@@ -126,7 +134,7 @@ impl OrderManager {
 
     pub fn cancel_sell_at(&mut self, price: SellPrice, in_id: usize) -> bool {
         match self.sells.get_mut(&price) {
-            Some((id, _, stat))
+            Some((id, _, stat, _))
                 if *id != 0 && *stat != CancelStatus::CancelSent && *id == in_id =>
             {
                 *stat = CancelStatus::CancelSent;
@@ -137,7 +145,7 @@ impl OrderManager {
     }
 
     pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> f64 {
-        let (id, amount, stat) = self.buys.get_mut(&price).unwrap();
+        let (id, amount, stat, _) = self.buys.get_mut(&price).unwrap();
         assert_eq!(*stat, CancelStatus::CancelSent);
         assert_eq!(in_id, *id);
         let amount = *amount;
@@ -146,7 +154,7 @@ impl OrderManager {
     }
 
     pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> f64 {
-        let (id, amount, stat) = self.sells.get_mut(&price).unwrap();
+        let (id, amount, stat, _) = self.sells.get_mut(&price).unwrap();
         assert_eq!(*stat, CancelStatus::CancelSent);
         assert_eq!(in_id, *id);
         let amount = *amount;
@@ -160,6 +168,40 @@ impl OrderManager {
 
     pub fn num_sells(&self) -> usize {
         self.sells.len()
+    }
+
+    pub fn set_late_buy_status(&mut self, price: BuyPrice, in_id: usize) {
+        match self.buys.get_mut(&price) {
+            Some((id, _, _, early)) if *id == in_id => *early = CancelAlone::Able,
+            _ => (),
+        }
+    }
+
+    pub fn set_late_sell_status(&mut self, price: SellPrice, in_id: usize) {
+        match self.sells.get_mut(&price) {
+            Some((id, _, _, early)) if *id == in_id => *early = CancelAlone::Able,
+            _ => (),
+        }
+    }
+
+    pub fn best_buy_price_late(&self) -> Option<(BuyPrice, usize)> {
+        self.buys
+            .iter()
+            .filter(|(_, (id, _, stat, alone))| {
+                *stat != CancelStatus::CancelSent && *id != 0 && *alone != CancelAlone::Early
+            })
+            .next()
+            .map(|(k, (id, _, _, _))| (*k, *id))
+    }
+
+    pub fn best_sell_price_late(&self) -> Option<(SellPrice, usize)> {
+        self.sells
+            .iter()
+            .filter(|(_, (id, _, stat, alone))| {
+                *stat != CancelStatus::CancelSent && *id != 0 && *alone != CancelAlone::Early
+            })
+            .next()
+            .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
     pub fn give_id<P: SidedPrice + Debug>(&mut self, price: &P, id: usize, amount: f64) {
@@ -222,12 +264,16 @@ impl OrderManager {
         let buys: Vec<_> = self
             .buys
             .iter()
-            .map(|(prc, (_, size, _))| format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size))
+            .map(|(prc, (_, size, _, _))| {
+                format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size)
+            })
             .collect();
         let sells: Vec<_> = self
             .sells
             .iter()
-            .map(|(prc, (_, size, _))| format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size))
+            .map(|(prc, (_, size, _, _))| {
+                format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size)
+            })
             .collect();
 
         format!(
