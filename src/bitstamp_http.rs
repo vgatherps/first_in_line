@@ -25,6 +25,38 @@ struct Balance {
     fee: f64,
 }
 
+#[derive(Deserialize)]
+struct InnerOrderCanceled {
+    price: f64,
+    amount: f64,
+    #[serde(rename = "type")]
+    in_type: usize,
+    id: usize,
+}
+
+pub struct OrderCanceled {
+    pub price: f64,
+    pub amount: f64,
+    pub side: Side,
+    pub id: usize,
+}
+
+#[derive(Deserialize)]
+struct InnerOrderSent {
+    price: SmallString,
+    amount: SmallString,
+    #[serde(rename = "type")]
+    in_type: SmallString,
+    id: SmallString,
+}
+
+pub struct OrderSent {
+    pub price: f64,
+    pub amount: f64,
+    pub side: Side,
+    pub id: usize,
+}
+
 // TODO fix assuming that the last transaction was a trade
 #[derive(Deserialize, Debug)]
 struct InnerTransaction {
@@ -39,6 +71,7 @@ struct InnerTransaction {
     tr_type: SmallString,
 }
 
+#[derive(Debug)]
 pub struct Transaction {
     pub id: usize,
     pub order_id: usize,
@@ -179,12 +212,11 @@ impl BitstampHttp {
     }
 
     fn generate_v1_signature(&self) -> (String, String) {
-        let counter = self.request_counter.fetch_add(1, Ordering::Relaxed);
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_millis();
-        let nonce_str = format!("{}{}", counter, time);
+        let nonce_str = format!("{}", time);
         let mac_str = format!("{}jwhf0251{}", nonce_str, self.auth_key);
         let mut mac =
             HmacSha256::new_varkey(self.auth_secret.as_bytes()).expect("Mac works with any key");
@@ -198,6 +230,7 @@ impl BitstampHttp {
 
     pub async fn cancel_all(&self) {
         let (sig, nonce) = self.generate_v1_signature();
+        println!("using sig {} nonce {}", sig, nonce);
         let res = self
             .http_client
             .post("https://www.bitstamp.net/api/cancel_all_orders/")
@@ -208,7 +241,7 @@ impl BitstampHttp {
             ]);
         let res = res.send().await.unwrap();
         assert!(res.status().is_success());
-        res.text().await.unwrap();
+        println!("cancel all response: {}", res.text().await.unwrap());
     }
 
     pub async fn request_positions(&self) -> (f64, f64, f64) {
@@ -288,7 +321,7 @@ impl BitstampHttp {
         initial[0].id
     }
 
-    // Now, the
+    // Now, the tracked transactions ...
 
     pub async fn request_transactions_from(
         &self,
@@ -337,12 +370,122 @@ impl BitstampHttp {
                     id: it.id,
                     order_id: it.order_id,
                     usd: usd.abs(),
-                    btc: it.btc.parse().unwrap(),
+                    btc: it.btc.parse::<f64>().unwrap().abs(),
                     btc_usd: it.btc_usd,
                     fee: it.fee.parse().unwrap(),
                     side: if usd < 0.0 { Side::Buy } else { Side::Sell },
                 }
             })
             .collect()
+    }
+
+    // TODO immediately send andasynchronously await the future
+    pub async fn send_cancel(&self, id: usize, parent: Arc<BitstampHttp>) -> Option<OrderCanceled> {
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+
+        let mut result = self
+            .http_client
+            .post("https://www.bitstamp.net/api/v2/cancel_order/")
+            .form(&[("id", id)])
+            .build()
+            .unwrap();
+
+        let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
+
+        let headers =
+            self.generate_request_headers_v2(body, time, "POST", "/api/v2/cancel_order/", "");
+
+        let res_headers = result.headers_mut();
+        for (name, val) in headers {
+            res_headers.insert(name.unwrap(), val);
+        }
+
+        let result = self.http_client.execute(result).await.unwrap();
+        let result = result.text().await.unwrap();
+        spawn_decrement_task(parent.clone());
+        if result.contains("not found") {
+            None
+        } else {
+            let order: InnerOrderCanceled =
+                serde_json::from_str(&result).expect("Couldn't parse cancel response");
+            Some(OrderCanceled {
+                price: order.price,
+                amount: order.amount,
+                id: order.id,
+                side: if order.in_type == 0 {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                },
+            })
+        }
+    }
+
+    // TODO immediately send and asynchronously await the future
+    pub async fn send_order(
+        &self,
+        amount: f64,
+        price: f64,
+        side: Side,
+        parent: Arc<BitstampHttp>,
+    ) -> OrderSent {
+        let api = match side {
+            Side::Buy => "/api/v2/buy/btcusd/",
+            Side::Sell => "/api/v2/sell/btcusd/",
+        };
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+
+        let price = ((price * 100.0).round() + 0.01) / 100.0;
+        assert_eq!(price, (price * 100.0) / 100.0);
+        let mut result = self
+            .http_client
+            .post(&format!("https://www.bitstamp.net{}", api))
+            .form(&[
+                ("amount", format!("{:.6}", amount)),
+                ("price", format!("{:.2}", price)),
+            ])
+            .build()
+            .unwrap();
+
+        let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
+
+        let headers = self.generate_request_headers_v2(body, time, "POST", api, "");
+
+        let res_headers = result.headers_mut();
+        for (name, val) in headers {
+            res_headers.insert(name.unwrap(), val);
+        }
+
+        let result = self
+            .http_client
+            .execute(result)
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        spawn_decrement_task(parent.clone());
+        let order = serde_json::from_str(&result);
+        if let Ok(order) = order {
+            let order: InnerOrderSent = order;
+            OrderSent {
+                price: order.price.parse().unwrap(),
+                amount: order.amount.parse::<f64>().unwrap().abs(),
+                id: order.id.parse().unwrap(),
+                side: if order.in_type == "0" {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                },
+            }
+        } else {
+            panic!("Got bad order response: {}", result);
+        }
     }
 }

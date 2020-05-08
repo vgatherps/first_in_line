@@ -6,6 +6,10 @@ use serde::Deserialize;
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
 
+pub fn convert_price_cents(price: f64) -> usize {
+    (price * 100.0).round() as usize
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(C)]
 pub enum Exchange {
@@ -16,6 +20,7 @@ pub enum Exchange {
     COUNT,
     Bitstamp,
     BitstampOrders,
+    BitstampTrades,
     Coinbase,
     OkexQuarterly,
 }
@@ -43,6 +48,14 @@ pub struct OrderUpdate {
     pub exchange_time: usize,
 }
 
+pub struct TradeUpdate {
+    pub cents: usize,
+    pub size: f64,
+    pub sell_order_id: usize,
+    pub buy_order_id: usize,
+    pub side: Side,
+}
+
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -53,6 +66,7 @@ pub struct BookUpdate {
 pub enum MarketEvent {
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
+    TradeUpdate(TradeUpdate),
     Clear,
 }
 
@@ -82,6 +96,7 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         }
         Exchange::Bitstamp => crate::exchange::bitstamp_connection().await,
         Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
+        Exchange::BitstampTrades => crate::exchange::bitstamp_trades_connection().await,
         Exchange::Coinbase => crate::exchange::coinbase_connection().await,
         Exchange::COUNT => panic!("Not valid to do this lookup"),
     }

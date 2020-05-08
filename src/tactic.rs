@@ -1,5 +1,5 @@
-use crate::bitstamp_http::{Trade, Transaction};
-use crate::exchange::normalized::Side;
+use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent, Trade, Transaction};
+use crate::exchange::normalized::{convert_price_cents, Side, TradeUpdate};
 use crate::local_book::InsideOrder;
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 use crate::order_manager::OrderManager;
@@ -7,10 +7,11 @@ use crate::position_manager::PositionManager;
 
 use horrorshow::html;
 
+use std::collections::VecDeque;
+
 use std::collections::HashSet;
 
 pub struct Tactic {
-    update_count: usize,
     required_profit: f64,
     required_fees: f64,
     imbalance_adjust: f64,
@@ -21,15 +22,51 @@ pub struct Tactic {
 
     max_orders_side: usize,
     worry_orders_side: usize,
+    max_send: usize,
+    orders_sent: usize,
+    orders_canceled: usize,
+
+    fees_paid: f64,
+
+    recent_trades: VecDeque<(Side, f64, f64)>,
 
     order_manager: OrderManager,
 
-    official_position: PositionManager,
     position: PositionManager,
 
-    estimated_transactions: Vec<Trade>,
+    main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
+    http: std::sync::Arc<BitstampHttp>,
+}
 
-    last_verified_transaction_id: usize,
+fn adjust_coins(coins: f64) -> f64 {
+    (coins * 10000.0).round() / 10000.0
+}
+
+async fn order_caller(
+    amount: f64,
+    price: f64,
+    side: Side,
+    http: std::sync::Arc<BitstampHttp>,
+    mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
+) {
+    let sent = http.send_order(amount, price, side, http.clone()).await;
+    assert!(eventer
+        .send(crate::TacticInternalEvent::OrderSent(sent))
+        .await
+        .is_ok());
+}
+
+async fn cancel_caller(
+    id: usize,
+    http: std::sync::Arc<BitstampHttp>,
+    mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
+) {
+    if let Some(cancel) = http.send_cancel(id, http.clone()).await {
+        assert!(eventer
+            .send(crate::TacticInternalEvent::OrderCanceled(cancel))
+            .await
+            .is_ok());
+    }
 }
 
 impl Tactic {
@@ -38,21 +75,26 @@ impl Tactic {
         fee_bps: f64,
         cost_of_position: f64,
         position: PositionManager,
+        http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
+        main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
         Tactic {
-            update_count: 1,
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
             imbalance_adjust: 0.2,
-            cancel_mult: 0.5,
+            cancel_mult: 0.3,
             order_manager: OrderManager::new(),
-            estimated_transactions: Vec::new(),
-            official_position: position.clone(),
-            max_orders_side: 12,
-            worry_orders_side: 12,
+            max_orders_side: 16,
+            worry_orders_side: 10,
+            fees_paid: 0.0,
+            max_send: 1000,
+            orders_sent: 0,
+            orders_canceled: 0,
+            recent_trades: VecDeque::new(),
             position,
             cost_of_position,
-            last_verified_transaction_id: 0,
+            http,
+            main_loop_not,
         }
     }
 
@@ -61,7 +103,7 @@ impl Tactic {
         while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
             let buy_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
-                let cid = self.order_manager.cancel_buy_at(price);
+                let cid = self.order_manager.cancel_buy_at(price).unwrap();
                 assert_eq!(cid, id);
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -71,7 +113,7 @@ impl Tactic {
         while let Some((price, id)) = self.order_manager.best_sell_price_cancel() {
             let sell_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, sell_prc, Side::Sell) {
-                let cid = self.order_manager.cancel_sell_at(price);
+                let cid = self.order_manager.cancel_sell_at(price).unwrap();
                 assert_eq!(cid, id);
                 self.send_sell_cancel_for(id, price);
             } else {
@@ -80,7 +122,7 @@ impl Tactic {
         }
         while self.order_manager.num_uncanceled_buys() >= self.worry_orders_side {
             if let Some((price, id)) = self.order_manager.worst_buy_price_cancel() {
-                let cid = self.order_manager.cancel_buy_at(price);
+                let cid = self.order_manager.cancel_buy_at(price).unwrap();
                 assert_eq!(cid, id);
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -89,7 +131,7 @@ impl Tactic {
         }
         while self.order_manager.num_uncanceled_sells() >= self.worry_orders_side {
             if let Some((price, id)) = self.order_manager.worst_sell_price_cancel() {
-                let cid = self.order_manager.cancel_sell_at(price);
+                let cid = self.order_manager.cancel_sell_at(price).unwrap();
                 assert_eq!(cid, id);
                 self.send_sell_cancel_for(id, price);
             } else {
@@ -98,22 +140,73 @@ impl Tactic {
         }
     }
 
+    pub fn cancel_stale_id(&mut self, id: usize, price: usize, side: Side) {
+        match side {
+            Side::Buy => {
+                let price = BuyPrice::new(price);
+                if let Some(cid) = self.order_manager.cancel_buy_at(price) {
+                    assert_eq!(cid, id);
+                    self.send_buy_cancel_for(id, price);
+                }
+            }
+            Side::Sell => {
+                let price = SellPrice::new(price);
+                if let Some(cid) = self.order_manager.cancel_sell_at(price) {
+                    assert_eq!(cid, id);
+                    self.send_sell_cancel_for(id, price);
+                }
+            }
+        }
+    }
+
     fn send_buy_cancel_for(&mut self, id: usize, price: BuyPrice) {
-        // TODO send via http client
-        self.order_manager.ack_buy_cancel(price, id);
+        tokio::task::spawn(cancel_caller(
+            id,
+            self.http.clone(),
+            self.main_loop_not.clone(),
+        ));
         println!(
-            "Cancelled BUY order at {:2}",
+            "Cancelled BUY order at {:2} SENT",
             price.unsigned() as f64 * 0.01
         );
     }
 
     fn send_sell_cancel_for(&mut self, id: usize, price: SellPrice) {
-        // TODO send via http client
-        self.order_manager.ack_sell_cancel(price, id);
+        tokio::task::spawn(cancel_caller(
+            id,
+            self.http.clone(),
+            self.main_loop_not.clone(),
+        ));
         println!(
-            "Cancelled SELL order at {:2}",
+            "Cancelled SELL order at {:2} SENT",
             price.unsigned() as f64 * 0.01
         );
+    }
+
+    pub fn ack_cancel_for(&mut self, cancel: &OrderCanceled) {
+        println!(
+            "Acking cancel for order {} price {} amount {}",
+            cancel.id, cancel.price, cancel.amount
+        );
+        self.orders_canceled += 1;
+        let cents = convert_price_cents(cancel.price);
+        match cancel.side {
+            Side::Buy => {
+                let known_volume = self
+                    .order_manager
+                    .ack_buy_cancel(BuyPrice::new(cents), cancel.id);
+                assert!(cancel.amount <= known_volume);
+                self.position
+                    .return_buy_balance(cancel.amount * cancel.price);
+            }
+            Side::Sell => {
+                let known_volume = self
+                    .order_manager
+                    .ack_sell_cancel(SellPrice::new(cents), cancel.id);
+                assert!(cancel.amount <= known_volume);
+                self.position.return_sell_balance(cancel.amount);
+            }
+        }
     }
 
     fn get_position_imbalance_cost(&self, fair: f64) -> f64 {
@@ -127,8 +220,8 @@ impl Tactic {
         prc: f64,
         side: Side,
     ) -> bool {
-        let around = around - self.get_position_imbalance_cost(around);
-        let required_diff = (self.required_fees + self.required_profit * self.cancel_mult) * prc;
+        let around = around + self.get_position_imbalance_cost(around);
+        let required_diff = (self.required_fees + self.required_profit) * self.cancel_mult * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
@@ -151,9 +244,9 @@ impl Tactic {
         prc: f64,
         side: Side,
     ) -> bool {
-        // if we have too many dollars, the position imbalance is positive so we downadjust the
-        // fair. Too many coins, we upadjust the fair
-        let around = around - self.get_position_imbalance_cost(around);
+        // if we have too many dollars, the position imbalance is positive so we adjust the fair
+        // upwards, making us buy more. Selling is reversed
+        let around = around + self.get_position_imbalance_cost(around);
         let required_diff = (self.required_fees + self.required_profit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
@@ -179,6 +272,12 @@ impl Tactic {
         premium_imbalance: f64,
         orders: &[InsideOrder],
     ) {
+        if !self.http.can_send_order() {
+            return;
+        }
+        if self.orders_sent >= self.max_send {
+            return;
+        }
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
@@ -192,13 +291,24 @@ impl Tactic {
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
             if self.consider_order_placement(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
+                let buy_coins = adjust_coins(200.0 / buy_prc);
+                let buy_dollars = buy_coins * buy_prc;
+
+                if !self.position.request_buy_balance(buy_dollars) {
+                    return;
+                }
                 if self
                     .order_manager
-                    .add_sent_order(&BuyPrice::new(first_buy.insert_price), 200.0)
+                    .add_sent_order(&BuyPrice::new(first_buy.insert_price), buy_coins)
                 {
-                    println!("Sent BUY at {:.2} size {:.4}", buy_prc, 200.0 / buy_prc);
-                    self.order_manager
-                        .give_id(&BuyPrice::new(first_buy.insert_price), 1);
+                    tokio::task::spawn(order_caller(
+                        buy_coins,
+                        buy_prc,
+                        Side::Buy,
+                        self.http.clone(),
+                        self.main_loop_not.clone(),
+                    ));
+                    println!("Sent BUY at {:.2} size {:.4}", buy_prc, buy_coins);
                 }
             }
         }
@@ -215,46 +325,101 @@ impl Tactic {
             let sell_prc = first_sell.insert_price as f64 * 0.01;
             if self.consider_order_placement(adjusted_fair, premium_imbalance, sell_prc, Side::Sell)
             {
+                let sell_dollars = 200.0;
+                let sell_coins = adjust_coins(sell_dollars / sell_prc);
+                // TODO this only works temporarily since I don't examine trades
+                if !self.position.request_sell_balance(sell_coins) {
+                    return;
+                }
                 if self
                     .order_manager
-                    .add_sent_order(&SellPrice::new(first_sell.insert_price), 200.0)
+                    .add_sent_order(&SellPrice::new(first_sell.insert_price), sell_coins)
                 {
-                    println!("Sent SELL at {:.2} size {:.4}", sell_prc, 200.0 / sell_prc);
-                    self.order_manager
-                        .give_id(&SellPrice::new(first_sell.insert_price), 1);
+                    tokio::task::spawn(order_caller(
+                        sell_coins,
+                        sell_prc,
+                        Side::Sell,
+                        self.http.clone(),
+                        self.main_loop_not.clone(),
+                    ));
+                    println!("Sent SELL at {:.2} size {:.4}", sell_prc, sell_coins);
                 }
             }
         }
     }
 
-    pub fn check_seen_trade(&mut self, trade: Trade) {
-        if self.last_verified_transaction_id >= trade.id {
-            return;
+    pub fn ack_send_for(&mut self, order: &OrderSent) {
+        println!("Acking send at {:.2}, {}", order.price, order.id);
+        self.orders_sent += 1;
+        let cents = convert_price_cents(order.price);
+        match order.side {
+            Side::Buy => {
+                let price = BuyPrice::new(cents);
+                self.order_manager.give_id(&price, order.id, order.amount);
+            }
+            Side::Sell => {
+                let price = SellPrice::new(cents);
+                println!("Pre-ack Sell {:?} prc {}", price, order.price);
+                self.order_manager.give_id(&price, order.id, order.amount);
+            }
         }
+        let mut sender = self.main_loop_not.clone();
+        let side = order.side;
+        let price = cents;
+        let id = order.id;
+        tokio::task::spawn(async move {
+            // wait 30 seconds, try and cancel order
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 30 as u64)).await;
+            assert!(sender
+                .send(crate::TacticInternalEvent::CancelStale(side, price, id))
+                .await
+                .is_ok());
+        });
+    }
 
-        let as_buy = BuyPrice::new((trade.price * 100.0) as usize);
-        let as_sell = SellPrice::new((trade.price * 100.0) as usize);
+    pub fn check_seen_trade(&mut self, trade: &TradeUpdate) {
+        let cents = trade.cents;
+        let as_buy = BuyPrice::new(cents);
+        let as_sell = SellPrice::new(cents);
 
-        let fee = trade.price as f64 * trade.amount * self.position.get_fee_estimate();
+        let dollars = cents as f64 * 0.01;
+
+        let fee = dollars * trade.size * self.position.get_fee_estimate();
 
         if self
             .order_manager
-            .remove_liquidity_from(&as_buy, trade.amount, trade.buy_order_id)
+            .remove_liquidity_from(&as_buy, trade.size, trade.buy_order_id)
         {
             // Our purchase succeeded, as far as we know
-            self.position.buy_coins(trade.amount, trade.price, fee);
-            self.estimated_transactions.push(trade);
+            self.position.buy_coins(trade.size, dollars);
+            self.fees_paid += fee;
+            self.recent_trades.push_front((Side::Buy, dollars, trade.size));
+
+            println!(
+                "Trade buy id {} price {:.2} size {:.5}",
+                trade.sell_order_id, dollars, trade.size
+            );
         } else if self.order_manager.remove_liquidity_from(
             &as_sell,
-            trade.amount,
+            trade.size,
             trade.sell_order_id,
         ) {
-            self.position.sell_coins(trade.amount, trade.price, fee);
-            self.estimated_transactions.push(trade);
+            self.position.sell_coins(trade.size, dollars);
+            self.fees_paid += fee;
+            self.recent_trades.push_front((Side::Sell, dollars, trade.size));
+            println!(
+                "Trade sell id {} price {:.2} size {:.5}",
+                trade.sell_order_id, dollars, trade.size
+            );
+        }
+
+        while self.recent_trades.len() > 20 {
+            self.recent_trades.pop_back();
         }
     }
 
-    pub fn sync_transactions(&mut self, transactions: Vec<Transaction>) {
+    /*
+    pub fn sync_transactions(&mut self, transactions: &Vec<Transaction>) {
         if transactions.len() == 0 {
             return;
         }
@@ -263,7 +428,7 @@ impl Tactic {
         let max_id = transactions.iter().map(|t| t.id).max().unwrap();
 
         if min_id <= self.last_verified_transaction_id {
-            panic!("God repeat transaction id");
+            panic!("Got repeat transaction id");
         }
 
         let transactions_seen: HashSet<_> = transactions.iter().map(|t| t.id).collect();
@@ -286,19 +451,36 @@ impl Tactic {
         }
 
         for transaction in transactions {
-            self.official_position
-                .set_fee_estimate(transaction.fee / (transaction.btc * transaction.btc_usd));
+            self.fees_paid += transaction.fee;
+            println!(
+                "Got transaction prc {:.2} amount {:.2} side {:?}",
+                transaction.btc_usd, transaction.btc, transaction.side
+            );
+            let cents = convert_price_cents(transaction.btc_usd);
             match transaction.side {
-                Side::Buy => self.official_position.buy_coins(
-                    transaction.btc,
-                    transaction.btc_usd,
-                    transaction.fee,
-                ),
-                Side::Sell => self.official_position.sell_coins(
-                    transaction.btc,
-                    transaction.btc_usd,
-                    transaction.fee,
-                ),
+                Side::Buy => {
+                    self.official_position.buy_coins(
+                        transaction.btc,
+                        transaction.btc_usd,
+                    );
+                    self.order_manager.remove_liquidity_from(
+                        &BuyPrice::new(cents),
+                        transaction.btc,
+                        transaction.order_id
+                    );
+                }
+                Side::Sell => {
+                    self.official_position.sell_coins(
+                        transaction.btc,
+                        transaction.btc_usd,
+                    );
+
+                    self.order_manager.remove_liquidity_from(
+                        &BuyPrice::new(cents),
+                        transaction.btc,
+                        transaction.order_id
+                    );
+                }
             }
         }
 
@@ -306,13 +488,12 @@ impl Tactic {
 
         // re-apply the remaining leftover trades
         for trade in self.estimated_transactions.iter() {
-            let fee = trade.price as f64 * trade.amount * self.position.get_fee_estimate();
             match trade.side {
-                Side::Buy => self.position.buy_coins(trade.amount, trade.price, fee),
-                Side::Sell => self.position.sell_coins(trade.amount, trade.price, fee),
+                Side::Buy => self.position.buy_coins(trade.amount, trade.price),
+                Side::Sell => self.position.sell_coins(trade.amount, trade.price),
             }
         }
-    }
+    }*/
 
     pub fn get_html_info(&self, fair: f64) -> String {
         let (desired_d, desired_c) = self.position.get_desired_position(fair);
@@ -323,8 +504,9 @@ impl Tactic {
                 h3(id="tactic state", clas="title") : "Tactic State Summary";
                 ul(id="Tactic summary") {
                     li(first?=true, class="item") {
-                        : format!("Balance: {:.2} usd, {:.4} btc",
-                                  self.position.dollars_balance,self.position.coins_balance);
+                        : format!("Balance: {:.2} usd, {:.4} btc, {:.2} total",
+                                  self.position.dollars_balance,self.position.coins_balance,
+                                  self.position.get_total_position(fair));
                     }
                     li(first?=false, class="item") {
                         : format!("Available: {:.2} usd, {:.4} btc",
@@ -334,19 +516,26 @@ impl Tactic {
                         : format!("Desired: {:.2} usd, {:.4} btc",
                                   desired_d, desired_c);
                     }
-                    li(first?=true, class="item") {
-                        : format!("Last Official Balance: {:.2} usd, {:.4} btc",
-                                  self.official_position.dollars_balance,self.official_position.coins_balance);
-                    }
                     li(first?=false, class="item") {
                         : format!("Position imbalance: {:.2} usd, price offset {:.3}",
                                   imbalance, imbalance * self.cost_of_position);
                     }
                     li(first?=false, class="item") {
-                        : format!("Estimated fee: {:.2}", self.official_position.get_fee_estimate());
+                        : format!("Estimated fee: {:.2}, paid {:.2}", self.position.get_fee_estimate(), self.fees_paid);
                     }
                     li(first?=false, class="item") {
-                        : format!("Unverified trades: {:?}", self.estimated_transactions);
+                        : format!("Orders: sent {}, canceled {}, rate {:.2}",
+                                  self.orders_sent,
+                                  self.orders_canceled,
+                                  if self.orders_sent == 0 {
+                                      0.0
+                                  } else {
+                                      self.orders_canceled as f64 / self.orders_sent as f64
+                                  });
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Recent trades: {:?}",
+                                  self.recent_trades);
                     }
                 }
             },

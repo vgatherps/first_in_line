@@ -1,6 +1,8 @@
 use crate::exchange::normalized::*;
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 
+use std::fmt::Debug;
+
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use horrorshow::html;
@@ -11,6 +13,7 @@ pub enum CancelStatus {
     CancelSent,
 }
 
+#[derive(Debug)]
 pub struct OrderManager {
     buys: BTreeMap<BuyPrice, (usize, f64, CancelStatus)>,
     sells: BTreeMap<SellPrice, (usize, f64, CancelStatus)>,
@@ -46,17 +49,17 @@ impl OrderManager {
         !contains && !crosses
     }
 
-    pub fn add_sent_order<P: SidedPrice>(&mut self, price: &P, dollars: f64) -> bool {
+    pub fn add_sent_order<P: SidedPrice>(&mut self, price: &P, amount: f64) -> bool {
         if !self.can_place_at(price) {
             return false;
         }
         match P::SIDE {
             Side::Buy => self
                 .buys
-                .insert(price.to_buy(), (0, dollars, CancelStatus::Open)),
+                .insert(price.to_buy(), (0, amount, CancelStatus::Open)),
             Side::Sell => self
                 .sells
-                .insert(price.to_sell(), (0, dollars, CancelStatus::Open)),
+                .insert(price.to_sell(), (0, amount, CancelStatus::Open)),
         };
         true
     }
@@ -109,34 +112,42 @@ impl OrderManager {
             .count()
     }
 
-    pub fn cancel_buy_at(&mut self, price: BuyPrice) -> usize {
-        let (id, _, stat) = self.buys.get_mut(&price).unwrap();
-        assert_ne!(*stat, CancelStatus::CancelSent);
-        assert_ne!(*id, 0);
-        *stat = CancelStatus::CancelSent;
-        *id
+    pub fn cancel_buy_at(&mut self, price: BuyPrice) -> Option<usize> {
+        match self.buys.get_mut(&price) {
+            Some((id, _, stat)) if *id != 0 && *stat != CancelStatus::CancelSent => {
+                *stat = CancelStatus::CancelSent;
+                Some(*id)
+            }
+            _ => None,
+        }
     }
 
-    pub fn cancel_sell_at(&mut self, price: SellPrice) -> usize {
-        let (id, _, stat) = self.sells.get_mut(&price).unwrap();
-        assert_ne!(*stat, CancelStatus::CancelSent);
-        assert_ne!(*id, 0);
-        *stat = CancelStatus::CancelSent;
-        *id
+    pub fn cancel_sell_at(&mut self, price: SellPrice) -> Option<usize> {
+        match self.sells.get_mut(&price) {
+            Some((id, _, stat)) if *id != 0 && *stat != CancelStatus::CancelSent => {
+                *stat = CancelStatus::CancelSent;
+                Some(*id)
+            }
+            _ => None,
+        }
     }
 
-    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) {
-        let (id, _, stat) = self.buys.get_mut(&price).unwrap();
+    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> f64 {
+        let (id, amount, stat) = self.buys.get_mut(&price).unwrap();
         assert_eq!(*stat, CancelStatus::CancelSent);
         assert_eq!(in_id, *id);
+        let amount = *amount;
         self.buys.remove(&price);
+        amount
     }
 
-    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) {
-        let (id, _, stat) = self.sells.get_mut(&price).unwrap();
+    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> f64 {
+        let (id, amount, stat) = self.sells.get_mut(&price).unwrap();
         assert_eq!(*stat, CancelStatus::CancelSent);
         assert_eq!(in_id, *id);
+        let amount = *amount;
         self.sells.remove(&price);
+        amount
     }
 
     pub fn num_buys(&self) -> usize {
@@ -147,7 +158,7 @@ impl OrderManager {
         self.sells.len()
     }
 
-    pub fn give_id<P: SidedPrice>(&mut self, price: &P, id: usize) {
+    pub fn give_id<P: SidedPrice + Debug>(&mut self, price: &P, id: usize, amount: f64) {
         assert_ne!(id, 0);
         match P::SIDE {
             Side::Buy => {
@@ -155,12 +166,14 @@ impl OrderManager {
                 let order = self.buys.get_mut(&price).unwrap();
                 assert_eq!(order.0, 0);
                 order.0 = id;
+                order.1 = amount;
             }
             Side::Sell => {
                 let price = price.to_sell();
                 let order = self.sells.get_mut(&price).unwrap();
                 assert_eq!(order.0, 0);
                 order.0 = id;
+                order.1 = amount;
             }
         };
     }
@@ -168,7 +181,7 @@ impl OrderManager {
     pub fn remove_liquidity_from<P: SidedPrice>(
         &mut self,
         price: &P,
-        dollars: f64,
+        amount: f64,
         id: usize,
     ) -> bool {
         match P::SIDE {
@@ -176,7 +189,7 @@ impl OrderManager {
                 let price = price.to_buy();
                 match self.buys.entry(price) {
                     Entry::Occupied(mut occ) if occ.get().0 == id => {
-                        occ.get_mut().1 -= dollars;
+                        occ.get_mut().1 -= amount;
                         if occ.get_mut().1 <= 0.0000001 {
                             occ.remove_entry();
                         }
@@ -189,7 +202,7 @@ impl OrderManager {
                 let price = price.to_sell();
                 match self.sells.entry(price) {
                     Entry::Occupied(mut occ) if occ.get().0 == id => {
-                        occ.get_mut().1 -= dollars;
+                        occ.get_mut().1 -= amount;
                         if occ.get_mut().1 <= 0.0000001 {
                             occ.remove_entry();
                         }
@@ -207,7 +220,7 @@ impl OrderManager {
             .iter()
             .map(|(prc, (_, size, _))| format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size))
             .collect();
-let sells: Vec<_> = self
+        let sells: Vec<_> = self
             .sells
             .iter()
             .map(|(prc, (_, size, _))| format!("({:.2}x{:.4})", prc.unsigned() as f64 * 0.01, size))
@@ -267,7 +280,7 @@ mod tests {
     fn test_remove_liquidity() {
         let mut manager = OrderManager::new();
         assert!(manager.add_sent_order(&BuyPrice::new(10), 10.0));
-        manager.give_id(&BuyPrice::new(10), 1);
+        manager.give_id(&BuyPrice::new(10), 1, 10.0);
         assert!(!manager.add_sent_order(&SellPrice::new(10), 10.0));
         assert!(manager.remove_liquidity_from(&BuyPrice::new(10), 5.0, 1));
         assert!(!manager.add_sent_order(&SellPrice::new(10), 10.0));

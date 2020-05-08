@@ -6,7 +6,8 @@
 //I would not abide by all of the given practices in here in production quality trading code
 
 use exchange::{
-    bitmex_connection, bitstamp_connection, bitstamp_orders_connection, okex_connection, OkexType,
+    bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
+    okex_connection, OkexType,
 };
 
 use crate::exchange::normalized::*;
@@ -52,18 +53,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     rt.block_on(run())
 }
 
-enum TacticTimerEvent {
-    CheckTransactionsFrom(usize),
-    CheckOpenOrders,
-    OrderCanCancel,
-}
-
-enum TacticInternalEvent {
-    TransactionsDataReceived(Vec<bitstamp_http::Transaction>),
-    OpenOrdersDataReceived(Vec<usize>),
-    OrderAliveStatus(usize, bool),
-    OrderSent(usize),
-    OrderCanceled(usize, usize),
+pub enum TacticInternalEvent {
+    OrderCanceled(bitstamp_http::OrderCanceled),
+    OrderSent(bitstamp_http::OrderSent),
+    CancelStale(Side, usize, usize),
     DisplayHtml,
 }
 
@@ -71,6 +64,10 @@ enum TacticEventType {
     RemoteFair,
     LocalBook(SmallVec<MarketEvent>),
     InsideOrders(SmallVec<local_book::InsideOrder>),
+    Trades(SmallVec<TradeUpdate>),
+    AckCancel(bitstamp_http::OrderCanceled),
+    AckSend(bitstamp_http::OrderSent),
+    CancelStale(Side, usize, usize),
     WriteHtml,
 }
 
@@ -80,25 +77,6 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
         event_queue.send(TacticInternalEvent::DisplayHtml).await;
     }
 }
-
-async fn transaction_not_loop(
-    mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
-    client: Arc<bitstamp_http::BitstampHttp>,
-    mut last_seen_transaction: usize,
-) {
-    loop {
-        tokio::time::delay_for(std::time::Duration::from_millis(10000)).await;
-        let transactions = client
-            .request_transactions_from(last_seen_transaction, client.clone())
-            .await;
-        if transactions.len() > 0 {
-            event_queue
-                .send(TacticInternalEvent::TransactionsDataReceived(transactions))
-                .await;
-        }
-    }
-}
-
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();
@@ -114,24 +92,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || html_writer(html, html_reader));
 
     let position = position_manager::PositionManager::create(&*http).await;
-    let last_seen = http.request_initial_transaction().await;
 
     let bitstamp = bitstamp_connection();
     let bitstamp_orders = bitstamp_orders_connection();
+    let bitstamp_trades = bitstamp_trades_connection();
     let bitmex = bitmex_connection();
     let okex_spot = okex_connection(OkexType::Spot);
     let okex_swap = okex_connection(OkexType::Swap);
 
-    let (bitmex, okex_spot, okex_swap, mut bitstamp, mut bitstamp_orders) =
-        join!(bitmex, okex_spot, okex_swap, bitstamp, bitstamp_orders);
+    let (bitmex, okex_spot, okex_swap, mut bitstamp, mut bitstamp_orders, mut bitstamp_trades) = join!(
+        bitmex,
+        okex_spot,
+        okex_swap,
+        bitstamp,
+        bitstamp_orders,
+        bitstamp_trades
+    );
 
     // Spawn all tasks after we've connected to everything
     tokio::task::spawn(html_writer_loop(event_queue.clone()));
-    tokio::task::spawn(transaction_not_loop(
-        event_queue.clone(),
-        http.clone(),
-        last_seen,
-    ));
 
     let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
     let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
@@ -153,6 +132,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         args.fee_bps,
         args.cost_of_position,
         position,
+        http,
+        event_queue.clone(),
     );
 
     loop {
@@ -163,9 +144,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 local_book.handle_new_order(&order.events)),
                 event = event_reader.recv().fuse() => match event {
                     Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
+                    Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
+                    Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
+                    Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
                     None => panic!("event queue died"),
-                    _ => panic!("Can't do work"),
-                }
+                },
+            trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
+                trades.events.into_iter().map(|t|
+                                              match t {
+                                                  MarketEvent::TradeUpdate(trade) => trade,
+                                                  _ => panic!("Non-trade received"),
+                                              }).collect()
+                                                                           ),
         };
         match &event_type {
             TacticEventType::RemoteFair => {
@@ -179,10 +169,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     displacement.handle_local(local_fair);
                 };
             }
-            _ => (),
+            TacticEventType::Trades(trades) => {
+                for trade in trades {
+                    tactic.check_seen_trade(trade);
+                }
+            }
+            TacticEventType::CancelStale(side, price, id) => {
+                tactic.cancel_stale_id(*id, *price, *side)
+            }
+            TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
+            TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
+            TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
         }
         if let (
-            Some((bbo, local_fair)),
+            Some((_, local_fair)),
             Some((displacement_val, expected_premium)),
             Some(remote_fair),
         ) = (
@@ -229,6 +229,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     html_queue.send(html).expect("Couldn't send html");
                 }
+                // Already handled
+                TacticEventType::AckCancel(_)
+                | TacticEventType::AckSend(_)
+                | TacticEventType::CancelStale(_, _, _)
+                | TacticEventType::Trades(_) => (),
             };
         }
     }
