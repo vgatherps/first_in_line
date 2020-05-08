@@ -192,15 +192,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     tactic.check_seen_trade(trade);
                 }
             }
-            TacticEventType::CancelStale(side, price, id) => {
-                tactic.cancel_stale_id(*id, *price, *side)
-            }
             TacticEventType::SetLateStatus(side, price, id) => {
                 tactic.set_late_status(*id, *price, *side)
             }
             TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
             TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
-            TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
+            TacticEventType::InsideOrders(_)
+            | TacticEventType::WriteHtml
+            | TacticEventType::CancelStale(_, _, _) => (),
         }
         if let (
             Some((((bid, _), (offer, _)), local_fair)),
@@ -226,6 +225,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     premium - expected_premium,
                     &events,
                 ),
+                TacticEventType::CancelStale(side, price, id) => {
+                    tactic.cancel_stale_id((bid, offer), *id, *price, *side)
+                }
                 TacticEventType::WriteHtml => {
                     let html = format!(
                         "
@@ -260,7 +262,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Already handled
                 TacticEventType::AckCancel(_)
                 | TacticEventType::AckSend(_)
-                | TacticEventType::CancelStale(_, _, _)
                 | TacticEventType::SetLateStatus(_, _, _)
                 | TacticEventType::Trades(_) => (),
             };

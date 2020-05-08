@@ -168,18 +168,23 @@ impl Tactic {
         }
     }
 
-    pub fn cancel_stale_id(&mut self, id: usize, price: usize, side: Side) {
+    pub fn cancel_stale_id(&mut self, bbo: (usize, usize), id: usize, price: usize, side: Side) {
+        let (bid, offer) = bbo;
         match side {
             Side::Buy => {
-                let price = BuyPrice::new(price);
-                if self.order_manager.cancel_buy_at(price, id) {
-                    self.send_buy_cancel_for(id, price);
+                let bprice = BuyPrice::new(price);
+                if price < bid && (bid - price) > 50 && self.order_manager.cancel_buy_at(bprice, id)
+                {
+                    self.send_buy_cancel_for(id, bprice);
                 }
             }
             Side::Sell => {
-                let price = SellPrice::new(price);
-                if self.order_manager.cancel_sell_at(price, id) {
-                    self.send_sell_cancel_for(id, price);
+                let sprice = SellPrice::new(price);
+                if price > offer
+                    && (price - offer) > 50
+                    && self.order_manager.cancel_sell_at(sprice, id)
+                {
+                    self.send_sell_cancel_for(id, sprice);
                 }
             }
         }
@@ -330,12 +335,13 @@ impl Tactic {
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
             let penny_prc = buy_prc + 0.01;
-            let actual_buy_prc = if first_buy.insert_size > 0.5 && self.consider_order_placement(
-                adjusted_fair,
-                premium_imbalance,
-                penny_prc,
-                Side::Buy,
-            ) {
+            let actual_buy_prc = if first_buy.insert_size > 0.5
+                && self.consider_order_placement(
+                    adjusted_fair,
+                    premium_imbalance,
+                    penny_prc,
+                    Side::Buy,
+                ) {
                 Some(penny_prc)
             } else if self.consider_order_placement(
                 adjusted_fair,
@@ -381,12 +387,13 @@ impl Tactic {
             assert!(first_sell.side == Side::Sell);
             let sell_prc = first_sell.insert_price as f64 * 0.01;
             let penny_prc = sell_prc - 0.01;
-            let actual_sell_prc = if first_sell.insert_size > 0.5 && self.consider_order_placement(
-                adjusted_fair,
-                premium_imbalance,
-                penny_prc,
-                Side::Sell,
-            ) {
+            let actual_sell_prc = if first_sell.insert_size > 0.5
+                && self.consider_order_placement(
+                    adjusted_fair,
+                    premium_imbalance,
+                    penny_prc,
+                    Side::Sell,
+                ) {
                 Some(penny_prc)
             } else if self.consider_order_placement(
                 adjusted_fair,
