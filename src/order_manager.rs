@@ -206,6 +206,7 @@ impl OrderManager {
 
     pub fn give_id<P: SidedPrice + Debug>(&mut self, price: &P, id: usize, amount: f64) {
         assert_ne!(id, 0);
+        println!("{:?}", self);
         match P::SIDE {
             Side::Buy => {
                 let price = price.to_buy();

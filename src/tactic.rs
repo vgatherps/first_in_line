@@ -143,7 +143,7 @@ impl Tactic {
             }
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
-            if price > offer && (offer.unsigned() - price.unsigned()) > 1 {
+            if offer > price && (offer.unsigned() - price.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
@@ -329,7 +329,25 @@ impl Tactic {
             }
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
-            if self.consider_order_placement(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
+            let penny_prc = buy_prc + 0.01;
+            let actual_buy_prc = if first_buy.insert_size > 1.0 && self.consider_order_placement(
+                adjusted_fair,
+                premium_imbalance,
+                penny_prc,
+                Side::Buy,
+            ) {
+                Some(penny_prc)
+            } else if self.consider_order_placement(
+                adjusted_fair,
+                premium_imbalance,
+                buy_prc,
+                Side::Buy,
+            ) {
+                Some(buy_prc)
+            } else {
+                None
+            };
+            if let Some(buy_prc) = actual_buy_prc {
                 let buy_coins = adjust_coins(200.0 / buy_prc);
                 let buy_dollars = buy_coins * buy_prc;
 
@@ -338,7 +356,7 @@ impl Tactic {
                 }
                 if self
                     .order_manager
-                    .add_sent_order(&BuyPrice::new(first_buy.insert_price), buy_coins)
+                    .add_sent_order(&BuyPrice::new(convert_price_cents(buy_prc)), buy_coins)
                 {
                     tokio::task::spawn(order_caller(
                         buy_coins,
@@ -362,8 +380,25 @@ impl Tactic {
             }
             assert!(first_sell.side == Side::Sell);
             let sell_prc = first_sell.insert_price as f64 * 0.01;
-            if self.consider_order_placement(adjusted_fair, premium_imbalance, sell_prc, Side::Sell)
-            {
+            let penny_prc = sell_prc - 0.01;
+            let actual_sell_prc = if first_sell.insert_size > 1.0 && self.consider_order_placement(
+                adjusted_fair,
+                premium_imbalance,
+                penny_prc,
+                Side::Sell,
+            ) {
+                Some(penny_prc)
+            } else if self.consider_order_placement(
+                adjusted_fair,
+                premium_imbalance,
+                sell_prc,
+                Side::Sell,
+            ) {
+                Some(sell_prc)
+            } else {
+                None
+            };
+            if let Some(sell_prc) = actual_sell_prc {
                 let sell_dollars = 200.0;
                 let sell_coins = adjust_coins(sell_dollars / sell_prc);
                 // TODO this only works temporarily since I don't examine trades
@@ -372,7 +407,7 @@ impl Tactic {
                 }
                 if self
                     .order_manager
-                    .add_sent_order(&SellPrice::new(first_sell.insert_price), sell_coins)
+                    .add_sent_order(&SellPrice::new(convert_price_cents(sell_prc)), sell_coins)
                 {
                     tokio::task::spawn(order_caller(
                         sell_coins,

@@ -14,6 +14,7 @@ pub struct LocalBook {
 #[derive(Debug)]
 pub struct InsideOrder {
     pub insert_price: usize,
+    pub insert_size: f64,
     pub most_aggressive_on_side: usize,
     pub side: Side,
 }
@@ -74,6 +75,7 @@ impl LocalBook {
                         };
                         Some(InsideOrder {
                             insert_price: order.cents,
+                            insert_size: order.size,
                             side: order.side,
                             most_aggressive_on_side,
                         })
