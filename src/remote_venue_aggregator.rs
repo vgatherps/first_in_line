@@ -13,6 +13,8 @@ pub struct RemoteVenueAggregator {
     bitmex: MarketDataStream,
     okex_spot: MarketDataStream,
     okex_swap: MarketDataStream,
+    okex_quarterly: MarketDataStream,
+    coinbase: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
     fairs: [f64; Exchange::COUNT as usize],
     size_ema: [Ema; Exchange::COUNT as usize],
@@ -24,6 +26,8 @@ impl RemoteVenueAggregator {
         bitmex: MarketDataStream,
         okex_spot: MarketDataStream,
         okex_swap: MarketDataStream,
+        okex_quarterly: MarketDataStream,
+        coinbase: MarketDataStream,
         valuer: FairValue,
         size_ratio: f64,
     ) -> RemoteVenueAggregator {
@@ -31,6 +35,8 @@ impl RemoteVenueAggregator {
             bitmex,
             okex_spot,
             okex_swap,
+            okex_quarterly,
+            coinbase,
             valuer,
             fairs: Default::default(),
             size_ema: [Ema::new(size_ratio); Exchange::COUNT as usize],
@@ -74,6 +80,8 @@ impl RemoteVenueAggregator {
             b = self.bitmex.next().fuse() => self.update_fair_for(b),
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
+            b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
+            b = self.coinbase.next().fuse() => self.update_fair_for(b),
         }
     }
 
@@ -100,6 +108,12 @@ impl RemoteVenueAggregator {
                     }
                     li(first?=false, class="item") {
                         : format!("OkexSwap: {}", self.get_exchange_description(Exchange::OkexSwap))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("OkexQuarterly: {}", self.get_exchange_description(Exchange::OkexQuarterly))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Coinbase: {}", self.get_exchange_description(Exchange::Coinbase))
                     }
                     li(first?=false, class="item") {
                         : format!("Fair value: {}", self.calculate_fair().unwrap_or(0.0))

@@ -16,13 +16,13 @@ pub enum Exchange {
     Bitmex,
     OkexSpot,
     OkexSwap,
+    OkexQuarterly,
+    Coinbase,
     // Non-used by remote exchanges go below here
     COUNT,
     Bitstamp,
     BitstampOrders,
     BitstampTrades,
-    Coinbase,
-    OkexQuarterly,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Debug, Copy, Clone)]

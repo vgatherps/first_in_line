@@ -7,6 +7,7 @@
 
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
+    coinbase_connection,
     okex_connection, OkexType,
 };
 
@@ -99,11 +100,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bitmex = bitmex_connection();
     let okex_spot = okex_connection(OkexType::Spot);
     let okex_swap = okex_connection(OkexType::Swap);
+    let okex_quarterly = okex_connection(OkexType::Quarterly);
+    let coinbase = coinbase_connection();
 
-    let (bitmex, okex_spot, okex_swap, mut bitstamp, mut bitstamp_orders, mut bitstamp_trades) = join!(
+    let (bitmex, okex_spot, okex_swap, okex_quarterly, coinbase, mut bitstamp, mut bitstamp_orders, mut bitstamp_trades) = join!(
         bitmex,
         okex_spot,
         okex_swap,
+        okex_quarterly,
+        coinbase,
         bitstamp,
         bitstamp_orders,
         bitstamp_trades
@@ -119,6 +124,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         bitmex,
         okex_spot,
         okex_swap,
+        okex_quarterly,
+        coinbase,
         remote_fair_value,
         0.001,
     );
