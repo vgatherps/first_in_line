@@ -96,7 +96,7 @@ impl Tactic {
             max_orders_side: 16,
             worry_orders_side: 10,
             fees_paid: 0.0,
-            max_send: 1000,
+            max_send: 100000,
             orders_sent: 0,
             orders_canceled: 0,
             recent_trades: VecDeque::new(),
