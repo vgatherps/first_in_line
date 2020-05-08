@@ -547,3 +547,18 @@ impl Tactic {
         )
     }
 }
+
+impl Drop for Tactic {
+    fn drop(&mut self) {
+        while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
+            if self.order_manager.cancel_buy_at(price, id) {
+                self.send_buy_cancel_for(id, price);
+            }       
+        }
+        while let Some((price, id)) = self.order_manager.best_sell_price_cancel() {
+            if self.order_manager.cancel_sell_at(price, id) {
+                self.send_sell_cancel_for(id, price);
+            }       
+        }
+    }
+}
