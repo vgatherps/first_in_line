@@ -112,7 +112,7 @@ impl LocalBook {
             format!(
                 "{}",
                 html! {
-                    h3(id="remote heading", class="title") : "Remote fair value summary";
+                    h3(id="remote heading", class="title") : "Local fair value summary";
                     ul(id="Local book info") {
                         li(first?=true, class="item") {
                             : format!("Local bbo: ({:.2}, {:.2})x({:.2}, {:.2}), fair {:.2}",

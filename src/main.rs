@@ -206,7 +206,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         <!DOCYPE html>
                         <html>
                         <head>
-                        <meta charset=\"UTF-8\">
+                        <meta charset=\"UTF-8\" content-type=\"text/html\">
                         <meta name=\"description\" content=\"Bitcoin\">
                         <meta http-equiv=\"refresh\" content=\"3\" >
                         </head>
