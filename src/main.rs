@@ -290,7 +290,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         runs_count += 1;
         println!("Resetting time {}", runs_count);
-        assert!(runs_count <= 1);
+        assert!(runs_count <= 5);
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
     }
 }
