@@ -144,22 +144,28 @@ impl OrderManager {
         }
     }
 
-    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> f64 {
-        let (id, amount, stat, _) = self.buys.get_mut(&price).unwrap();
-        assert_eq!(*stat, CancelStatus::CancelSent);
-        assert_eq!(in_id, *id);
-        let amount = *amount;
-        self.buys.remove(&price);
-        amount
+    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<f64> {
+        match self.buys.get(&price) {
+            Some((id, amount, stat, _)) if *id == in_id => {
+                assert_eq!(*stat, CancelStatus::CancelSent);
+                let amount = *amount;
+                self.buys.remove(&price);
+                Some(amount)
+            }
+            _ => None,
+        }
     }
 
-    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> f64 {
-        let (id, amount, stat, _) = self.sells.get_mut(&price).unwrap();
-        assert_eq!(*stat, CancelStatus::CancelSent);
-        assert_eq!(in_id, *id);
-        let amount = *amount;
-        self.sells.remove(&price);
-        amount
+    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> Option<f64> {
+        match self.sells.get(&price) {
+            Some((id, amount, stat, _)) if *id == in_id => {
+                assert_eq!(*stat, CancelStatus::CancelSent);
+                let amount = *amount;
+                self.sells.remove(&price);
+                Some(amount)
+            }
+            _ => None,
+        }
     }
 
     pub fn num_buys(&self) -> usize {

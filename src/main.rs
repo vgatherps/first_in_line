@@ -78,7 +78,10 @@ enum TacticEventType {
 async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
     loop {
         tokio::time::delay_for(std::time::Duration::from_millis(1000)).await;
-        assert!(event_queue.send(TacticInternalEvent::DisplayHtml).await.is_ok());
+        assert!(event_queue
+            .send(TacticInternalEvent::DisplayHtml)
+            .await
+            .is_ok());
     }
 }
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -92,7 +95,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut runs_count: usize = 0;
     loop {
-
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         // and is part of the reset cycle
 
@@ -116,16 +118,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             mut bitstamp,
             mut bitstamp_orders,
             mut bitstamp_trades,
-            ) = join!(
-                bitmex,
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                coinbase,
-                bitstamp,
-                bitstamp_orders,
-                bitstamp_trades
-                );
+        ) = join!(
+            bitmex,
+            okex_spot,
+            okex_swap,
+            okex_quarterly,
+            coinbase,
+            bitstamp,
+            bitstamp_orders,
+            bitstamp_trades
+        );
 
         // Spawn all tasks after we've connected to everything
         tokio::task::spawn(html_writer_loop(event_queue.clone()));
@@ -141,7 +143,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             coinbase,
             remote_fair_value,
             0.001,
-            );
+        );
 
         let mut local_book = local_book::LocalBook::new(local_fair_value);
 
@@ -154,7 +156,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             position,
             http.clone(),
             event_queue.clone(),
-            );
+        );
 
         loop {
             let event_type = select! {
@@ -208,19 +210,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // Do a reset
                     break;
                 }
-                TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml | TacticEventType::CancelStale(_, _, _) => (),
+                TacticEventType::InsideOrders(_)
+                | TacticEventType::WriteHtml
+                | TacticEventType::CancelStale(_, _, _) => (),
             }
             if let (
                 Some((((bid, _), (offer, _)), local_fair)),
                 Some((displacement_val, expected_premium)),
                 Some(remote_fair),
-                ) = (
-                    local_book.get_local_tob(),
-                    displacement.get_displacement(),
-                    remote_agg.calculate_fair(),
-                    ) {
-                    let premium = local_fair - remote_fair;
-                    match &event_type {
+            ) = (
+                local_book.get_local_tob(),
+                displacement.get_displacement(),
+                remote_agg.calculate_fair(),
+            ) {
+                let premium = local_fair - remote_fair;
+                match &event_type {
                         TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
                             .handle_book_update(
                                 (bid, offer),
@@ -275,7 +279,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             | TacticEventType::Reset // handled above
                             | TacticEventType::Trades(_) => (),
                     };
-                }
+            }
         }
         runs_count += 1;
         println!("Resetting time {}", runs_count);

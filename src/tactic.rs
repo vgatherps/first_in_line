@@ -24,6 +24,7 @@ pub struct Tactic {
     max_send: usize,
     orders_sent: usize,
     orders_canceled: usize,
+    missed_cancels: usize,
 
     fees_paid: f64,
 
@@ -99,6 +100,7 @@ impl Tactic {
             max_send: 100000,
             orders_sent: 0,
             orders_canceled: 0,
+            missed_cancels: 0,
             recent_trades: VecDeque::new(),
             position,
             cost_of_position,
@@ -227,6 +229,7 @@ impl Tactic {
         );
     }
 
+    // TODO this will panic on a race? Doesn't seem to be an issue
     pub fn ack_cancel_for(&mut self, cancel: &OrderCanceled) {
         println!(
             "Acking cancel for order {} price {} amount {}",
@@ -236,27 +239,37 @@ impl Tactic {
         let cents = convert_price_cents(cancel.price);
         match cancel.side {
             Side::Buy => {
-                let known_volume = self
+                if let Some(known_volume) = self
                     .order_manager
-                    .ack_buy_cancel(BuyPrice::new(cents), cancel.id);
-                if cancel.amount > known_volume {
-                    println!("Got buy cancel for {}, only have {}",
-                             cancel.amount, known_volume);
-                    self.reset();
-                }
-                self.position
-                    .return_buy_balance(cancel.amount * cancel.price);
+                        .ack_buy_cancel(BuyPrice::new(cents), cancel.id) {
+                            if cancel.amount > known_volume {
+                                println!(
+                                    "Got buy cancel for {}, only have {}",
+                                    cancel.amount, known_volume
+                                    );
+                                self.reset();
+                            }
+                            self.position
+                                .return_buy_balance(cancel.amount * cancel.price);
+                        } else {
+                            self.missed_cancels += 1;
+                        }   
             }
             Side::Sell => {
-                let known_volume = self
+                if let Some(known_volume) = self
                     .order_manager
-                    .ack_sell_cancel(SellPrice::new(cents), cancel.id);
+                    .ack_sell_cancel(SellPrice::new(cents), cancel.id) {
                 if cancel.amount > known_volume {
-                    println!("Got sell cancel for {}, only have {}",
-                             cancel.amount, known_volume);
+                    println!(
+                        "Got sell cancel for {}, only have {}",
+                        cancel.amount, known_volume
+                    );
                     self.reset();
                 }
                 self.position.return_sell_balance(cancel.amount);
+                    } else {
+                        self.missed_cancels += 1;
+                    }
             }
         }
     }
@@ -372,6 +385,13 @@ impl Tactic {
                 let buy_coins = adjust_coins(200.0 / buy_prc);
                 let buy_dollars = buy_coins * buy_prc;
 
+                if !self
+                    .order_manager
+                    .can_place_at(&BuyPrice::new(convert_price_cents(buy_prc)))
+                {
+                    return;
+                }
+
                 if !self.position.request_buy_balance(buy_dollars) {
                     return;
                 }
@@ -386,7 +406,6 @@ impl Tactic {
                         self.http.clone(),
                         self.main_loop_not.clone(),
                     ));
-                    println!("Sent BUY at {:.2} size {:.4}", buy_prc, buy_coins);
                 }
             }
         }
@@ -423,6 +442,12 @@ impl Tactic {
             if let Some(sell_prc) = actual_sell_prc {
                 let sell_dollars = 200.0;
                 let sell_coins = adjust_coins(sell_dollars / sell_prc);
+                if !self
+                    .order_manager
+                    .can_place_at(&SellPrice::new(convert_price_cents(sell_prc)))
+                {
+                    return;
+                }
                 // TODO this only works temporarily since I don't examine trades
                 if !self.position.request_sell_balance(sell_coins) {
                     return;
@@ -631,9 +656,10 @@ impl Tactic {
                         : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.fees_paid);
                     }
                     li(first?=false, class="item") {
-                        : format!("Orders: sent {}, canceled {}, rate {:.2}",
+                        : format!("Orders: sent {}, canceled {}, missed cancels: {}, rate {:.2}",
                                   self.orders_sent,
                                   self.orders_canceled,
+                                  self.missed_cancels,
                                   if self.orders_sent == 0 {
                                       0.0
                                   } else {
