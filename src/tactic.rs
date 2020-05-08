@@ -8,7 +8,7 @@ use crate::position_manager::PositionManager;
 use horrorshow::html;
 
 use std::collections::VecDeque;
-use std::time::{SystemTime};
+use std::time::SystemTime;
 
 use std::sync::atomic::Ordering;
 
@@ -44,6 +44,10 @@ fn adjust_coins(coins: f64) -> f64 {
     (coins * 10000.0).round() / 10000.0
 }
 
+fn le_compare(a: f64, b: f64) -> bool {
+    (a - 0.000001) <= b
+}
+
 // TODO should really care about exchange times
 
 async fn order_caller(
@@ -56,7 +60,7 @@ async fn order_caller(
     let _guard = scopeguard::guard((), |_| {
         if std::thread::panicking() {
             crate::DIE.store(true, Ordering::Relaxed);
-        }   
+        }
     });
     let send = SystemTime::now();
     let sent = http.send_order(amount, price, side, http.clone()).await;
@@ -77,7 +81,7 @@ async fn cancel_caller(
     let _guard = scopeguard::guard((), |_| {
         if std::thread::panicking() {
             crate::DIE.store(true, Ordering::Relaxed);
-        }   
+        }
     });
     let send = SystemTime::now();
     if let Some(cancel) = http.send_cancel(id, http.clone()).await {
@@ -253,35 +257,37 @@ impl Tactic {
             Side::Buy => {
                 if let Some(known_volume) = self
                     .order_manager
-                        .ack_buy_cancel(BuyPrice::new(cents), cancel.id) {
-                            if cancel.amount > known_volume {
-                                println!(
-                                    "Got buy cancel for {}, only have {}",
-                                    cancel.amount, known_volume
-                                    );
-                                self.reset();
-                            }
-                            self.position
-                                .return_buy_balance(cancel.amount * cancel.price);
-                        } else {
-                            self.missed_cancels += 1;
-                        }   
+                    .ack_buy_cancel(BuyPrice::new(cents), cancel.id)
+                {
+                    if !le_compare(cancel.amount, known_volume) {
+                        println!(
+                            "Got buy cancel for {}, only have {}",
+                            cancel.amount, known_volume
+                        );
+                        self.reset();
+                    }
+                    self.position
+                        .return_buy_balance(cancel.amount * cancel.price);
+                } else {
+                    self.missed_cancels += 1;
+                }
             }
             Side::Sell => {
                 if let Some(known_volume) = self
                     .order_manager
-                    .ack_sell_cancel(SellPrice::new(cents), cancel.id) {
-                if cancel.amount > known_volume {
-                    println!(
-                        "Got sell cancel for {}, only have {}",
-                        cancel.amount, known_volume
-                    );
-                    self.reset();
-                }
-                self.position.return_sell_balance(cancel.amount);
-                    } else {
-                        self.missed_cancels += 1;
+                    .ack_sell_cancel(SellPrice::new(cents), cancel.id)
+                {
+                    if !le_compare(cancel.amount, known_volume) {
+                        println!(
+                            "Got sell cancel for {}, only have {}",
+                            cancel.amount, known_volume
+                        );
+                        self.reset();
                     }
+                    self.position.return_sell_balance(cancel.amount);
+                } else {
+                    self.missed_cancels += 1;
+                }
             }
         }
     }

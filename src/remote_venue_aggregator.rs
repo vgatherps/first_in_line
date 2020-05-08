@@ -1,6 +1,6 @@
 use crate::ema::Ema;
 use crate::exchange::normalized::*;
-use crate::fair_value::{FairValue};
+use crate::fair_value::FairValue;
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, select};
 
