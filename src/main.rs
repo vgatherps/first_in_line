@@ -20,6 +20,8 @@ use structopt::StructOpt;
 
 use std::sync::Arc;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 mod args;
 mod bitstamp_http;
 mod displacement;
@@ -34,6 +36,8 @@ mod remote_venue_aggregator;
 mod tactic;
 
 use fair_value::*;
+
+pub static DIE: AtomicBool = AtomicBool::new(false);
 
 fn html_writer(filename: String, requests: mpsc::Receiver<String>) {
     while let Ok(request) = requests.recv() {
@@ -159,6 +163,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         loop {
+            if DIE.load(Ordering::Relaxed) {
+                panic!("Death variable set");
+            }
             let event_type = select! {
                 rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
                 block = bitstamp.next().fuse() => TacticEventType::LocalBook(block.events),

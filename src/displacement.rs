@@ -1,7 +1,5 @@
 use crate::ema::Ema;
-use horrorshow::helper::doctype;
 use horrorshow::html;
-use horrorshow::prelude::*;
 
 // What's the algorithm?
 // Look at the displacement of a fast ema of fair price from a slower ema of fair

@@ -8,7 +8,9 @@ use crate::position_manager::PositionManager;
 use horrorshow::html;
 
 use std::collections::VecDeque;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime};
+
+use std::sync::atomic::Ordering;
 
 pub struct Tactic {
     required_profit: f64,
@@ -51,6 +53,11 @@ async fn order_caller(
     http: std::sync::Arc<BitstampHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
+    let _guard = scopeguard::guard((), |_| {
+        if std::thread::panicking() {
+            crate::DIE.store(true, Ordering::Relaxed);
+        }   
+    });
     let send = SystemTime::now();
     let sent = http.send_order(amount, price, side, http.clone()).await;
     if let Ok(diff) = std::time::SystemTime::now().duration_since(send) {
@@ -67,6 +74,11 @@ async fn cancel_caller(
     http: std::sync::Arc<BitstampHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
+    let _guard = scopeguard::guard((), |_| {
+        if std::thread::panicking() {
+            crate::DIE.store(true, Ordering::Relaxed);
+        }   
+    });
     let send = SystemTime::now();
     if let Some(cancel) = http.send_cancel(id, http.clone()).await {
         if let Ok(diff) = std::time::SystemTime::now().duration_since(send) {
@@ -636,9 +648,10 @@ impl Tactic {
                 h3(id="tactic state", clas="title") : "Tactic State Summary";
                 ul(id="Tactic summary") {
                     li(first?=true, class="item") {
-                        : format!("Balance: {:.2} usd, {:.4} btc, {:.2} total",
+                        : format!("Balance: {:.2} usd, {:.4} btc, {:.2} total, {:.4} total btc",
                                   self.position.dollars_balance,self.position.coins_balance,
-                                  self.position.get_total_position(fair));
+                                  self.position.get_total_position(fair),
+                                  self.position.get_total_position(fair) / fair);
                     }
                     li(first?=false, class="item") {
                         : format!("Available: {:.2} usd, {:.4} btc",

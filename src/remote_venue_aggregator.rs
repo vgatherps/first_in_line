@@ -1,11 +1,10 @@
 use crate::ema::Ema;
 use crate::exchange::normalized::*;
-use crate::fair_value::{FairValue, FairValueResult};
+use crate::fair_value::{FairValue};
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, select};
 
 use horrorshow::html;
-use horrorshow::prelude::*;
 
 // Hardcoded because futures are a bit silly for selecting variable amounts
 // TODO make each book only return async market data when it receives a valid level
