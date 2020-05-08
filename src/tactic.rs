@@ -135,15 +135,19 @@ impl Tactic {
         }
         let (bid, offer) = (BuyPrice::new(bbo.0), SellPrice::new(bbo.1));
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
-            if price > bid && (price.unsigned() - bid.unsigned()) > 2 {
+            if price > bid && (price.unsigned() - bid.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
+            } else {
+                break;
             }
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
-            if price > offer && (offer.unsigned() - price.unsigned()) > 2 {
+            if price > offer && (offer.unsigned() - price.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
+            } else {
+                break;
             }
         }
         while self.order_manager.num_uncanceled_buys() >= self.worry_orders_side {
