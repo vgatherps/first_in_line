@@ -108,7 +108,7 @@ impl Tactic {
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
             imbalance_adjust: 0.2,
-            cancel_mult: 0.5,
+            cancel_mult: 0.3,
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
