@@ -1,11 +1,12 @@
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
-use serde::{Deserialize, Serialize};
+
+use serde::Deserialize;
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
 
-#[derive(Deserialize, Serialize, Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(C)]
 pub enum Exchange {
     Bitmex,
@@ -19,7 +20,7 @@ pub enum Exchange {
     OkexQuarterly,
 }
 
-#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Deserialize, Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Side {
     Buy,
     Sell,
@@ -34,7 +35,6 @@ impl Side {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
 pub struct OrderUpdate {
     pub cents: usize,
     pub size: f64,
@@ -43,7 +43,6 @@ pub struct OrderUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -51,27 +50,12 @@ pub struct BookUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Quote {
-    pub cents: usize,
-    pub size: f64,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct BBOUpdate {
-    bid: Option<Quote>,
-    ask: Option<Quote>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
 pub enum MarketEvent {
-    BBO(BBOUpdate),
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
     Clear,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
 pub struct MarketEventBlock {
     pub exchange: Exchange,
     pub events: SmallVec<MarketEvent>,

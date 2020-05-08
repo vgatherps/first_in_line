@@ -16,4 +16,11 @@ pub struct Arguments {
 
     #[structopt(long, default_value = "0.03", help = "Profit required per trade")]
     pub profit_bps: f64,
+
+    #[structopt(
+        long,
+        default_value = "0.0015",
+        help = "Pricing cost of holding a position"
+    )]
+    pub cost_of_position: f64,
 }

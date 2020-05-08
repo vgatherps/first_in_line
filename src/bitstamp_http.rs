@@ -1,13 +1,20 @@
 use hmac::{Hmac, Mac};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use serde::Deserialize;
 use sha2::Sha256;
-use std::sync::atomic::{AtomicUsize, Ordering};
 type HmacSha256 = Hmac<Sha256>;
 type SmallString = smallstr::SmallString<[u8; 32]>;
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use crate::exchange::normalized::Side;
+
+const MAX_NEW_ORDER: usize = 7500;
+const FAIL_THRESH: usize = 7900;
 
 #[derive(Deserialize)]
 struct Balance {
@@ -32,13 +39,24 @@ struct InnerTransaction {
     tr_type: SmallString,
 }
 
-struct Transaction {
-    id: usize,
-    order_id: usize,
-    usd: f64,
-    btc: f64,
-    btc_usd: f64,
-    fee: f64,
+pub struct Transaction {
+    pub id: usize,
+    pub order_id: usize,
+    pub usd: f64,
+    pub btc: f64,
+    pub btc_usd: f64,
+    pub fee: f64,
+    pub side: Side,
+}
+
+#[derive(Debug)]
+pub struct Trade {
+    pub id: usize,
+    pub buy_order_id: usize,
+    pub sell_order_id: usize,
+    pub amount: f64,
+    pub price: f64,
+    pub side: Side,
 }
 
 pub struct BitstampHttp {
@@ -49,6 +67,17 @@ pub struct BitstampHttp {
     x_auth_nonce: HeaderName,
     x_auth_timestamp: HeaderName,
     request_counter: AtomicUsize,
+    outstanding_request_counter: AtomicUsize,
+}
+
+async fn decrement(http: Arc<BitstampHttp>) {
+    tokio::time::delay_for(std::time::Duration::from_millis((10 * 60 + 64) * 1000)).await;
+    http.decrement_outstanding();
+}
+
+pub fn spawn_decrement_task(http: Arc<BitstampHttp>) {
+    http.increment_outstanding();
+    tokio::task::spawn(decrement(http));
 }
 
 impl BitstampHttp {
@@ -72,7 +101,29 @@ impl BitstampHttp {
             x_auth_sig: HeaderName::from_static("x-auth-signature"),
             x_auth_timestamp: HeaderName::from_static("x-auth-timestamp"),
             request_counter: AtomicUsize::new(1),
+            outstanding_request_counter: AtomicUsize::new(0),
         }
+    }
+
+    pub fn can_send_order(&self) -> bool {
+        self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
+    }
+
+    pub fn recent_outstanding(&self) -> usize {
+        self.outstanding_request_counter.load(Ordering::Relaxed)
+    }
+
+    fn decrement_outstanding(&self) {
+        self.outstanding_request_counter
+            .fetch_sub(1, Ordering::Relaxed);
+    }
+
+    fn increment_outstanding(&self) {
+        assert!(
+            self.outstanding_request_counter
+                .fetch_add(1, Ordering::Relaxed)
+                < FAIL_THRESH
+        );
     }
 
     // TODO TODO TODO this can all be precomputed
@@ -142,6 +193,8 @@ impl BitstampHttp {
         let hex_str = hex::encode_upper(result_bytes);
         (hex_str, nonce_str)
     }
+
+    // These are 1-time calls, so I don't worry about balancing them
 
     pub async fn cancel_all(&self) {
         let (sig, nonce) = self.generate_v1_signature();
@@ -235,7 +288,14 @@ impl BitstampHttp {
         initial[0].id
     }
 
-    pub async fn request_transactions_from(&self, from_id: usize) -> Vec<Transaction> {
+    // Now, the
+
+    pub async fn request_transactions_from(
+        &self,
+        from_id: usize,
+        parent: Arc<BitstampHttp>,
+    ) -> Vec<Transaction> {
+        spawn_decrement_task(parent);
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -270,13 +330,18 @@ impl BitstampHttp {
         transactions
             .into_iter()
             .filter(|t| t.tr_type == "2" && t.id != from_id)
-            .map(|it| Transaction {
-                id: it.id,
-                order_id: it.order_id,
-                usd: it.usd.parse().unwrap(),
-                btc: it.btc.parse().unwrap(),
-                btc_usd: it.btc_usd,
-                fee: it.fee.parse().unwrap(),
+            .map(|it| {
+                let usd: f64 = it.usd.parse().unwrap();
+                assert_ne!(usd, 0.0);
+                Transaction {
+                    id: it.id,
+                    order_id: it.order_id,
+                    usd: usd.abs(),
+                    btc: it.btc.parse().unwrap(),
+                    btc_usd: it.btc_usd,
+                    fee: it.fee.parse().unwrap(),
+                    side: if usd < 0.0 { Side::Buy } else { Side::Sell },
+                }
             })
             .collect()
     }
