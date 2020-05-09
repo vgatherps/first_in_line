@@ -113,10 +113,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut bad_runs_count: usize = 0;
     loop {
-        // and is part of the reset cycle
+        // This is a little weird. We need to 'kill this', but actually dropping it poisons
+        // the various events pushing into it. So instead, this lives outside the data loop scope,
+        // and at the end of each iteration a task is spawned (read: leaked) to consume and drop
+        // all incoming messages
+        let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         {
-            let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
-
+            // and is part of the reset cycle
             let position = position_manager::PositionManager::create(&*http).await;
 
             let bitstamp = bitstamp_connection();
@@ -321,7 +324,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         bad_runs_count += 1;
         println!("Resetting time {}", bad_runs_count);
         assert!(bad_runs_count <= 5);
+        tokio::spawn(async move {
+            while let Some(_) = event_reader.recv().await {}
+        });
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
-
     }
 }
