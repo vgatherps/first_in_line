@@ -579,22 +579,26 @@ impl<'a> Tactic<'a> {
         let price = cents;
         let id = order.id;
         tokio::task::spawn(async move {
-            // first wait 1 seconds, and set cancelable
-            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 1)).await;
+            // first wait 3 seconds, and set cancelable
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
             assert!(sender
                 .send(crate::TacticInternalEvent::SetLateStatus(side, price, id))
                 .await
                 .is_ok());
-            // wait 8ish more seconds, try and cancel order
+
+            // wait 60ish more seconds, try and cancel order
+            // Now that there's better protection against a wall of stale orders at the top,
+            // this is a lot less important
             let random_offset = (id / 19) % 4;
             tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * (5 + random_offset) as u64,
+                1000 * (60 + random_offset) as u64,
             ))
             .await;
             assert!(sender
                 .send(crate::TacticInternalEvent::CancelStale(side, price, id))
                 .await
                 .is_ok());
+
             // wait 10 more seconds, try and cancel order
             // if it's still gone, we missed a trade and should reset
             tokio::time::delay_for(std::time::Duration::from_millis(
