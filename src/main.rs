@@ -83,7 +83,7 @@ enum TacticEventType {
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
     loop {
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 50 * 3)).await;
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 50 * 30)).await;
         assert!(event_queue
             .send(TacticInternalEvent::Reset(false))
             .await
@@ -243,7 +243,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
                     TacticEventType::Reset => {
                         // let in-flight items propogate
-                        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
+                        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10)).await;
 
                         // Do a reset
                         break;
@@ -326,6 +326,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             while let Some(_) = event_reader.recv().await {}
         });
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10)).await;
     }
 }
