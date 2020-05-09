@@ -321,7 +321,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // We keep the state in the destructor to ensure everything exits cleanly
-        bad_runs_count += 1;
         println!("Resetting time {}", bad_runs_count);
         assert!(bad_runs_count <= 5);
         tokio::spawn(async move {
