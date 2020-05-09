@@ -305,7 +305,7 @@ impl Tactic {
     fn reset(&self) {
         let mut not = self.main_loop_not.clone();
         tokio::task::spawn(async move {
-            assert!(not.send(crate::TacticInternalEvent::Reset).await.is_ok());
+            assert!(not.send(crate::TacticInternalEvent::Reset(true)).await.is_ok());
         });
     }
 

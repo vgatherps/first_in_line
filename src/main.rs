@@ -63,7 +63,7 @@ pub enum TacticInternalEvent {
     SetLateStatus(Side, usize, usize),
     CancelStale(Side, usize, usize),
     DisplayHtml,
-    Reset,
+    Reset(bool),
 }
 
 enum TacticEventType {
@@ -77,6 +77,16 @@ enum TacticEventType {
     SetLateStatus(Side, usize, usize),
     WriteHtml,
     Reset,
+}
+
+async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
+    loop {
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 50 * 3)).await;
+        assert!(event_queue
+            .send(TacticInternalEvent::Reset(false))
+            .await
+            .is_ok());
+    }
 }
 
 async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
@@ -97,7 +107,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let html = args.html.clone();
     std::thread::spawn(move || html_writer(html, html_reader));
 
-    let mut runs_count: usize = 0;
+    let mut bad_runs_count: usize = 0;
     loop {
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         // and is part of the reset cycle
@@ -135,6 +145,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // Spawn all tasks after we've connected to everything
         tokio::task::spawn(html_writer_loop(event_queue.clone()));
+        tokio::task::spawn(reset_loop(event_queue.clone()));
 
         let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
         let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
@@ -177,7 +188,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
                         Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
                         Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
-                        Some(TacticInternalEvent::Reset) => TacticEventType::Reset,
+                        Some(TacticInternalEvent::Reset(is_bad)) => {
+                            if is_bad {
+                                bad_runs_count += 1;
+                            }
+                            TacticEventType::Reset
+                        },
                         None => panic!("event queue died"),
                     },
                     trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
@@ -288,9 +304,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
             }
         }
-        runs_count += 1;
-        println!("Resetting time {}", runs_count);
-        assert!(runs_count <= 5);
+        bad_runs_count += 1;
+        println!("Resetting time {}", bad_runs_count);
+        assert!(bad_runs_count <= 5);
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
     }
 }
