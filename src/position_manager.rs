@@ -15,8 +15,8 @@ fn compare_ge(a: f64, b: f64) -> bool {
 }
 
 impl PositionManager {
-    pub async fn create(http: &BitstampHttp) -> PositionManager {
-        http.cancel_all().await;
+    pub async fn create(http: std::sync::Arc<BitstampHttp>) -> PositionManager {
+        http.cancel_all(http.clone()).await;
         let (coins_balance, dollars_balance, fee) = http.request_positions().await;
         PositionManager {
             coins_balance,

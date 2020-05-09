@@ -83,7 +83,7 @@ enum TacticEventType {
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
     loop {
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 50 * 30)).await;
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 60 * 10)).await;
         assert!(event_queue
             .send(TacticInternalEvent::Reset(false))
             .await
@@ -111,6 +111,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let html = args.html.clone();
     std::thread::spawn(move || html_writer(html, html_reader));
 
+    let test_position = position_manager::PositionManager::create(http.clone()).await;
+
+    let mut statistics = tactic::TacticStatistics::new(test_position.dollars_balance, test_position.coins_balance);
+
+    drop(test_position);
+
     let mut bad_runs_count: usize = 0;
     loop {
         // This is a little weird. We need to 'kill this', but actually dropping it poisons
@@ -120,7 +126,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         {
             // and is part of the reset cycle
-            let position = position_manager::PositionManager::create(&*http).await;
+            let position = position_manager::PositionManager::create(http.clone()).await;
 
             let bitstamp = bitstamp_connection();
             let bitstamp_orders = bitstamp_orders_connection();
@@ -177,6 +183,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 args.fee_bps,
                 args.cost_of_position,
                 position,
+                &mut statistics,
                 http.clone(),
                 event_queue.clone(),
                 );
@@ -243,7 +250,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
                     TacticEventType::Reset => {
                         // let in-flight items propogate
-                        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10)).await;
+                        // We do a cancel all before we wait, and will do another after the wait
+                        // In almost all cases this should get rid of in-flight orders
+                        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
 
                         // Do a reset
                         break;
@@ -326,6 +335,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             while let Some(_) = event_reader.recv().await {}
         });
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10)).await;
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
     }
 }

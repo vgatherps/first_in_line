@@ -213,21 +213,11 @@ impl BitstampHttp {
         (hex_str, nonce_str)
     }
 
-    // These are 1-time calls, so I don't worry about balancing them
-
-    pub async fn cancel_all(&self) {
-        let (sig, nonce) = self.generate_v1_signature();
-        let res = self
-            .http_client
-            .post("https://www.bitstamp.net/api/cancel_all_orders/")
-            .form(&[
-                ("key", &self.auth_key),
-                ("signature", &sig),
-                ("nonce", &nonce),
-            ]);
-        let res = res.send().await.unwrap();
-        assert!(res.status().is_success());
-        println!("cancel all response: {}", res.text().await.unwrap());
+    // the api v1 cancel all was being weird so I do everything V2
+    pub async fn cancel_all(&self, parent: Arc<Self>) {
+        for id in self.get_open_orders().await {
+            self.send_cancel(id, parent.clone()).await;
+        }
     }
 
     pub async fn request_positions(&self) -> (f64, f64, f64) {
@@ -305,6 +295,38 @@ impl BitstampHttp {
             );
         }
         initial[0].id
+    }
+
+    pub async fn get_open_orders(
+        &self
+        ) -> Vec<usize> {
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+
+        let headers = self.generate_request_headers_v2("", time, "POST", "/api/v2/open_orders/btcusd/", "");
+
+        let result = self
+            .http_client
+            .post("https://www.bitstamp.net/api/v2/open_orders/btcusd/")
+            .headers(headers)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        #[derive(Deserialize)]
+        struct GetId {
+            id: String
+        };
+
+        serde_json::from_str::<Vec<GetId>>(&result).unwrap()
+            .into_iter()
+            .map(|g| g.id.parse::<usize>().unwrap())
+            .collect()
     }
 
     // Now, the tracked transactions ...

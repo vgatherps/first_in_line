@@ -13,7 +13,36 @@ use std::time::SystemTime;
 
 use std::sync::atomic::Ordering;
 
-pub struct Tactic {
+pub struct TacticStatistics {
+    fees_paid: f64,
+    initial_usd: f64,
+    initial_btc: f64,
+
+    orders_sent: usize,
+    orders_canceled: usize,
+    missed_cancels: usize,
+
+    trades: usize,
+    recent_trades: VecDeque<(Side, f64, f64)>,
+}
+
+impl TacticStatistics {
+    pub fn new(initial_usd: f64, initial_btc: f64) -> TacticStatistics {
+        TacticStatistics {
+            fees_paid: 0.0,
+            orders_sent: 0,
+            orders_canceled: 0,
+            missed_cancels: 0,
+            trades: 0,
+            recent_trades: VecDeque::new(),
+
+            initial_usd,
+            initial_btc,
+        }
+    }
+}
+
+pub struct Tactic<'a> {
     required_profit: f64,
     required_fees: f64,
     imbalance_adjust: f64,
@@ -25,16 +54,8 @@ pub struct Tactic {
     max_orders_side: usize,
     worry_orders_side: usize,
     max_send: usize,
-    orders_sent: usize,
-    orders_canceled: usize,
-    missed_cancels: usize,
 
-    fees_paid: f64,
-    initial_usd: f64,
-    initial_btc: f64,
-
-    recent_trades: VecDeque<(Side, f64, f64)>,
-
+    statistics: &'a mut TacticStatistics,
     order_manager: OrderManager,
 
     position: PositionManager,
@@ -100,12 +121,13 @@ async fn cancel_caller(
     }
 }
 
-impl Tactic {
+impl<'a> Tactic<'a> {
     pub fn new(
         profit_bps: f64,
         fee_bps: f64,
         cost_of_position: f64,
         position: PositionManager,
+        statistics: &'a mut TacticStatistics,
         http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
@@ -118,20 +140,14 @@ impl Tactic {
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
-            fees_paid: 0.0,
-            initial_usd: position.dollars_balance,
-            initial_btc: position.coins_balance,
             max_send: 100000,
-            orders_sent: 0,
-            orders_canceled: 0,
-            missed_cancels: 0,
-            recent_trades: VecDeque::new(),
             // reproducible seed is fine here, better for sims
             rng: xorshift::thread_rng(),
             position,
             cost_of_position,
             http,
             main_loop_not,
+            statistics,
         }
     }
 
@@ -278,7 +294,7 @@ impl Tactic {
             "Acking cancel for order {} price {} amount {}",
             cancel.id, cancel.price, cancel.amount
         );
-        self.orders_canceled += 1;
+        self.statistics.orders_canceled += 1;
         let cents = convert_price_cents(cancel.price);
         match cancel.side {
             Side::Buy => {
@@ -296,7 +312,7 @@ impl Tactic {
                     self.position
                         .return_buy_balance(cancel.amount * cancel.price);
                 } else {
-                    self.missed_cancels += 1;
+                    self.statistics.missed_cancels += 1;
                 }
             }
             Side::Sell => {
@@ -313,7 +329,7 @@ impl Tactic {
                     }
                     self.position.return_sell_balance(cancel.amount);
                 } else {
-                    self.missed_cancels += 1;
+                    self.statistics.missed_cancels += 1;
                 }
             }
         }
@@ -392,7 +408,7 @@ impl Tactic {
         if !self.http.can_send_order() {
             return;
         }
-        if self.orders_sent >= self.max_send {
+        if self.statistics.orders_sent >= self.max_send {
             return;
         }
         // shuffle +/ 50 dollars on order size
@@ -519,7 +535,7 @@ impl Tactic {
 
     pub fn ack_send_for(&mut self, order: &OrderSent) {
         println!("Acking send at {:.2}, {}", order.price, order.id);
-        self.orders_sent += 1;
+        self.statistics.orders_sent += 1;
         let cents = convert_price_cents(order.price);
         match order.side {
             Side::Buy => {
@@ -580,8 +596,8 @@ impl Tactic {
         {
             // Our purchase succeeded, as far as we know
             self.position.buy_coins(trade.size, dollars);
-            self.fees_paid += fee;
-            self.recent_trades
+            self.statistics.fees_paid += fee;
+            self.statistics.recent_trades
                 .push_front((Side::Buy, dollars, trade.size));
 
             println!(
@@ -594,8 +610,8 @@ impl Tactic {
             trade.sell_order_id,
         ) {
             self.position.sell_coins(trade.size, dollars);
-            self.fees_paid += fee;
-            self.recent_trades
+            self.statistics.fees_paid += fee;
+            self.statistics.recent_trades
                 .push_front((Side::Sell, dollars, trade.size));
             println!(
                 "Trade sell id {} price {:.2} size {:.5}",
@@ -603,8 +619,8 @@ impl Tactic {
             );
         }
 
-        while self.recent_trades.len() > 20 {
-            self.recent_trades.pop_back();
+        while self.statistics.recent_trades.len() > 20 {
+            self.statistics.recent_trades.pop_back();
         }
     }
 
@@ -689,8 +705,8 @@ impl Tactic {
         let (desired_d, desired_c) = self.position.get_desired_position(fair);
         let imbalance = self.position.get_position_imbalance(fair);
 
-        let if_held_dollars = self.initial_usd + self.initial_btc * fair;
-        let if_held_btc = self.initial_btc + self.initial_usd / fair;
+        let if_held_dollars = self.statistics.initial_usd + self.statistics.initial_btc * fair;
+        let if_held_btc = self.statistics.initial_btc + self.statistics.initial_usd / fair;
 
         let up = self.position.get_total_position(fair) - if_held_dollars;
 
@@ -712,7 +728,7 @@ impl Tactic {
                     li(first?=true, class="item") {
                         : format!("If just held: {:.2}, total usd, {:.4} total btc. Up {:.2} usd, without fees {:.2}",
                                   if_held_dollars, if_held_btc,
-                                  up, up + self.fees_paid);
+                                  up, up + self.statistics.fees_paid);
                     }
                     li(first?=false, class="item") {
                         : format!("Desired: {:.2} usd, {:.4} btc",
@@ -723,22 +739,23 @@ impl Tactic {
                                   imbalance, imbalance * self.cost_of_position);
                     }
                     li(first?=false, class="item") {
-                        : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.fees_paid);
+                        : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.statistics.fees_paid);
                     }
                     li(first?=false, class="item") {
-                        : format!("Orders: sent {}, canceled {}, missed cancels: {}, rate {:.2}",
-                                  self.orders_sent,
-                                  self.orders_canceled,
-                                  self.missed_cancels,
-                                  if self.orders_sent == 0 {
+                        : format!("Orders: trades: {}, sent {}, canceled {}, missed cancels: {}, rate {:.2}",
+                                  self.statistics.trades,
+                                  self.statistics.orders_sent,
+                                  self.statistics.orders_canceled,
+                                  self.statistics.missed_cancels,
+                                  if self.statistics.orders_sent == 0 {
                                       0.0
                                   } else {
-                                      self.orders_canceled as f64 / self.orders_sent as f64
+                                      self.statistics.orders_canceled as f64 / self.statistics.orders_sent as f64
                                   });
                     }
                     li(first?=false, class="item") {
                         : format!("Recent trades: {:?}",
-                                  self.recent_trades);
+                                  self.statistics.recent_trades);
                     }
                 }
             },
@@ -747,17 +764,12 @@ impl Tactic {
     }
 }
 
-impl Drop for Tactic {
+async fn do_cancel_all(http: std::sync::Arc<BitstampHttp>) {
+    http.cancel_all(http.clone()).await
+}
+
+impl<'a> Drop for Tactic<'a> {
     fn drop(&mut self) {
-        while let Some((price, id)) = self.order_manager.best_buy_price_cancel() {
-            if self.order_manager.cancel_buy_at(price, id) {
-                self.send_buy_cancel_for(id, price);
-            }
-        }
-        while let Some((price, id)) = self.order_manager.best_sell_price_cancel() {
-            if self.order_manager.cancel_sell_at(price, id) {
-                self.send_sell_cancel_for(id, price);
-            }
-        }
+        tokio::task::spawn(do_cancel_all(self.http.clone()));
     }
 }
