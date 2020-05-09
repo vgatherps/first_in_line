@@ -113,168 +113,169 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut bad_runs_count: usize = 0;
     loop {
-        let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         // and is part of the reset cycle
+        {
+            let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
 
-        let position = position_manager::PositionManager::create(&*http).await;
+            let position = position_manager::PositionManager::create(&*http).await;
 
-        let bitstamp = bitstamp_connection();
-        let bitstamp_orders = bitstamp_orders_connection();
-        let bitstamp_trades = bitstamp_trades_connection();
-        let bitmex = bitmex_connection();
-        let okex_spot = okex_connection(OkexType::Spot);
-        let okex_swap = okex_connection(OkexType::Swap);
-        let okex_quarterly = okex_connection(OkexType::Quarterly);
-        let coinbase = coinbase_connection();
+            let bitstamp = bitstamp_connection();
+            let bitstamp_orders = bitstamp_orders_connection();
+            let bitstamp_trades = bitstamp_trades_connection();
+            let bitmex = bitmex_connection();
+            let okex_spot = okex_connection(OkexType::Spot);
+            let okex_swap = okex_connection(OkexType::Swap);
+            let okex_quarterly = okex_connection(OkexType::Quarterly);
+            let coinbase = coinbase_connection();
 
-        let (
-            bitmex,
-            okex_spot,
-            okex_swap,
-            okex_quarterly,
-            coinbase,
-            mut bitstamp,
-            mut bitstamp_orders,
-            mut bitstamp_trades,
-        ) = join!(
-            bitmex,
-            okex_spot,
-            okex_swap,
-            okex_quarterly,
-            coinbase,
-            bitstamp,
-            bitstamp_orders,
-            bitstamp_trades
-        );
+            let (
+                bitmex,
+                okex_spot,
+                okex_swap,
+                okex_quarterly,
+                coinbase,
+                mut bitstamp,
+                mut bitstamp_orders,
+                mut bitstamp_trades,
+                ) = join!(
+                    bitmex,
+                    okex_spot,
+                    okex_swap,
+                    okex_quarterly,
+                    coinbase,
+                    bitstamp,
+                    bitstamp_orders,
+                    bitstamp_trades
+                    );
 
-        // Spawn all tasks after we've connected to everything
-        tokio::task::spawn(html_writer_loop(event_queue.clone()));
-        tokio::task::spawn(reset_loop(event_queue.clone()));
+            // Spawn all tasks after we've connected to everything
+            tokio::task::spawn(html_writer_loop(event_queue.clone()));
+            tokio::task::spawn(reset_loop(event_queue.clone()));
 
-        let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
-        let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
+            let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
+            let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
 
-        let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
-            bitmex,
-            okex_spot,
-            okex_swap,
-            okex_quarterly,
-            coinbase,
-            remote_fair_value,
-            0.001,
-        );
+            let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
+                bitmex,
+                okex_spot,
+                okex_swap,
+                okex_quarterly,
+                coinbase,
+                remote_fair_value,
+                0.001,
+                );
 
-        let mut local_book = local_book::LocalBook::new(local_fair_value);
+            let mut local_book = local_book::LocalBook::new(local_fair_value);
 
-        let mut displacement = displacement::Displacement::new();
+            let mut displacement = displacement::Displacement::new();
 
-        let mut tactic = tactic::Tactic::new(
-            args.profit_bps,
-            args.fee_bps,
-            args.cost_of_position,
-            position,
-            http.clone(),
-            event_queue.clone(),
-        );
+            let mut tactic = tactic::Tactic::new(
+                args.profit_bps,
+                args.fee_bps,
+                args.cost_of_position,
+                position,
+                http.clone(),
+                event_queue.clone(),
+                );
 
-        loop {
-            if DIE.load(Ordering::Relaxed) {
-                panic!("Death variable set");
-            }
-            let event_type = select! {
-                rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
-                block = bitstamp.next().fuse() => TacticEventType::LocalBook(block.events),
-                order = bitstamp_orders.next().fuse() => TacticEventType::InsideOrders(
-                    local_book.handle_new_order(&order.events)),
-                    event = event_reader.recv().fuse() => match event {
-                        Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
-                        Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
-                        Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
-                        Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
-                        Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
-                        Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
-                        Some(TacticInternalEvent::Reset(is_bad)) => {
-                            if is_bad {
-                                bad_runs_count += 1;
-                            }
-                            TacticEventType::Reset
+            loop {
+                if DIE.load(Ordering::Relaxed) {
+                    panic!("Death variable set");
+                }
+                let event_type = select! {
+                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
+                    block = bitstamp.next().fuse() => TacticEventType::LocalBook(block.events),
+                    order = bitstamp_orders.next().fuse() => TacticEventType::InsideOrders(
+                        local_book.handle_new_order(&order.events)),
+                        event = event_reader.recv().fuse() => match event {
+                            Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
+                            Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
+                            Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
+                            Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
+                            Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
+                            Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
+                            Some(TacticInternalEvent::Reset(is_bad)) => {
+                                if is_bad {
+                                    bad_runs_count += 1;
+                                }
+                                TacticEventType::Reset
+                            },
+                            None => panic!("event queue died"),
                         },
-                        None => panic!("event queue died"),
-                    },
-                    trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
-                        trades.events.into_iter().map(|t|
-                                                      match t {
-                                                          MarketEvent::TradeUpdate(trade) => trade,
-                                                          _ => panic!("Non-trade received"),
-                                                      }).collect()
-                        ),
-            };
-            match &event_type {
-                TacticEventType::RemoteFair => {
-                    if let Some(rf) = remote_agg.calculate_fair() {
-                        displacement.handle_remote(rf);
-                    }
-                }
-                TacticEventType::LocalBook(events) => {
-                    local_book.handle_book_update(&events);
-                    if let Some((_, local_fair)) = local_book.get_local_tob() {
-                        displacement.handle_local(local_fair);
-                    };
-                }
-                TacticEventType::Trades(trades) => {
-                    for trade in trades {
-                        tactic.check_seen_trade(trade);
-                    }
-                }
-                TacticEventType::SetLateStatus(side, price, id) => {
-                    tactic.set_late_status(*id, *price, *side)
-                }
-                TacticEventType::CancelStale(side, price, id) => {
-                    tactic.cancel_stale_id(*id, *price, *side)
-                }
-                TacticEventType::CheckGone(side, price, id) => {
-                    tactic.check_order_gone(*id, *price, *side)
-                }
-                TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
-                TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
-                TacticEventType::Reset => {
-                    // let in-flight items propogate
-                    tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
-
-                    // Do a reset
-                    break;
-                }
-                TacticEventType::InsideOrders(_)
-                | TacticEventType::WriteHtml
-                 => (),
-            }
-            if let (
-                Some((((bid, _), (offer, _)), local_fair)),
-                Some((displacement_val, expected_premium)),
-                Some(remote_fair),
-            ) = (
-                local_book.get_local_tob(),
-                displacement.get_displacement(),
-                remote_agg.calculate_fair(),
-            ) {
-                let premium = local_fair - remote_fair;
+                        trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
+                            trades.events.into_iter().map(|t|
+                                                          match t {
+                                                              MarketEvent::TradeUpdate(trade) => trade,
+                                                              _ => panic!("Non-trade received"),
+                                                          }).collect()
+                            ),
+                };
                 match &event_type {
-                        TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
-                            .handle_book_update(
-                                (bid, offer),
-                                local_fair,
-                                displacement_val,
-                                premium - expected_premium,
-                                ),
-                                TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
+                    TacticEventType::RemoteFair => {
+                        if let Some(rf) = remote_agg.calculate_fair() {
+                            displacement.handle_remote(rf);
+                        }
+                    }
+                    TacticEventType::LocalBook(events) => {
+                        local_book.handle_book_update(&events);
+                        if let Some((_, local_fair)) = local_book.get_local_tob() {
+                            displacement.handle_local(local_fair);
+                        };
+                    }
+                    TacticEventType::Trades(trades) => {
+                        for trade in trades {
+                            tactic.check_seen_trade(trade);
+                        }
+                    }
+                    TacticEventType::SetLateStatus(side, price, id) => {
+                        tactic.set_late_status(*id, *price, *side)
+                    }
+                    TacticEventType::CancelStale(side, price, id) => {
+                        tactic.cancel_stale_id(*id, *price, *side)
+                    }
+                    TacticEventType::CheckGone(side, price, id) => {
+                        tactic.check_order_gone(*id, *price, *side)
+                    }
+                    TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
+                    TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
+                    TacticEventType::Reset => {
+                        // let in-flight items propogate
+                        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
+
+                        // Do a reset
+                        break;
+                    }
+                    TacticEventType::InsideOrders(_)
+                        | TacticEventType::WriteHtml
+                        => (),
+                }
+                if let (
+                    Some((((bid, _), (offer, _)), local_fair)),
+                    Some((displacement_val, expected_premium)),
+                    Some(remote_fair),
+                    ) = (
+                        local_book.get_local_tob(),
+                        displacement.get_displacement(),
+                        remote_agg.calculate_fair(),
+                        ) {
+                        let premium = local_fair - remote_fair;
+                        match &event_type {
+                            TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
+                                .handle_book_update(
+                                    (bid, offer),
                                     local_fair,
                                     displacement_val,
                                     premium - expected_premium,
-                                    &events,
                                     ),
-                        TacticEventType::WriteHtml => {
-                            let html = format!(
-                                "
+                                    TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
+                                        local_fair,
+                                        displacement_val,
+                                        premium - expected_premium,
+                                        &events,
+                                        ),
+                                        TacticEventType::WriteHtml => {
+                                            let html = format!(
+                                                "
                         <!DOCYPE html>
                         <html>
                         <head>
@@ -301,22 +302,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         displacement = displacement.get_html_info(),
                         http = http.get_html_info(),
                         );
-                            html_queue.send(html).expect("Couldn't send html");
-                        }
-                        // Already handled
-                        TacticEventType::AckCancel(_)
-                            | TacticEventType::AckSend(_)
-                            | TacticEventType::SetLateStatus(_, _, _)
-                            | TacticEventType::CancelStale(_, _, _)
-                            | TacticEventType::CheckGone(_, _, _)
-                            | TacticEventType::Reset // handled above
-                            | TacticEventType::Trades(_) => (),
-                    };
+                                            html_queue.send(html).expect("Couldn't send html");
+                                        }
+                            // Already handled
+                            TacticEventType::AckCancel(_)
+                                | TacticEventType::AckSend(_)
+                                | TacticEventType::SetLateStatus(_, _, _)
+                                | TacticEventType::CancelStale(_, _, _)
+                                | TacticEventType::CheckGone(_, _, _)
+                                | TacticEventType::Reset // handled above
+                                | TacticEventType::Trades(_) => (),
+                        };
+                    }
             }
         }
+
+        // We keep the state in the destructor to ensure everything exits cleanly
         bad_runs_count += 1;
         println!("Resetting time {}", bad_runs_count);
         assert!(bad_runs_count <= 5);
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
+
     }
 }
