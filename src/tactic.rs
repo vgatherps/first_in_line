@@ -23,6 +23,8 @@ pub struct TacticStatistics {
     missed_cancels: usize,
 
     trades: usize,
+    traded_dollars: f64,
+
     recent_trades: VecDeque<(Side, f64, f64)>,
 }
 
@@ -34,6 +36,7 @@ impl TacticStatistics {
             orders_canceled: 0,
             missed_cancels: 0,
             trades: 0,
+            traded_dollars: 0.0,
             recent_trades: VecDeque::new(),
 
             initial_usd,
@@ -597,6 +600,8 @@ impl<'a> Tactic<'a> {
             // Our purchase succeeded, as far as we know
             self.position.buy_coins(trade.size, dollars);
             self.statistics.fees_paid += fee;
+            self.statistics.trades += 1;
+            self.statistics.traded_dollars += dollars * trade.size;
             self.statistics.recent_trades
                 .push_front((Side::Buy, dollars, trade.size));
 
@@ -611,6 +616,8 @@ impl<'a> Tactic<'a> {
         ) {
             self.position.sell_coins(trade.size, dollars);
             self.statistics.fees_paid += fee;
+            self.statistics.trades += 1;
+            self.statistics.traded_dollars += dollars * trade.size;
             self.statistics.recent_trades
                 .push_front((Side::Sell, dollars, trade.size));
             println!(
@@ -742,8 +749,11 @@ impl<'a> Tactic<'a> {
                         : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.statistics.fees_paid);
                     }
                     li(first?=false, class="item") {
-                        : format!("Orders: trades: {}, sent {}, canceled {}, missed cancels: {}, rate {:.2}",
-                                  self.statistics.trades,
+                        : format!("Trades: {}, traded dollars: {:.2}",
+                                  self.statistics.trades, self.statistics.traded_dollars);
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Orders: sent {}, canceled {}, missed cancels: {}, rate {:.2}",
                                   self.statistics.orders_sent,
                                   self.statistics.orders_canceled,
                                   self.statistics.missed_cancels,
