@@ -30,6 +30,8 @@ pub struct Tactic {
     missed_cancels: usize,
 
     fees_paid: f64,
+    initial_usd: f64,
+    initial_btc: f64,
 
     recent_trades: VecDeque<(Side, f64, f64)>,
 
@@ -107,6 +109,7 @@ impl Tactic {
         http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
+
         Tactic {
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
@@ -116,6 +119,8 @@ impl Tactic {
             max_orders_side: 16,
             worry_orders_side: 10,
             fees_paid: 0.0,
+            initial_usd: position.dollars_balance,
+            initial_btc: position.coins_balance,
             max_send: 100000,
             orders_sent: 0,
             orders_canceled: 0,
@@ -657,11 +662,10 @@ impl Tactic {
         let (desired_d, desired_c) = self.position.get_desired_position(fair);
         let imbalance = self.position.get_position_imbalance(fair);
 
-        let initial_dollars = 4679.41;
-        let initial_btc = 0.3773;
+        let if_held_dollars = self.initial_usd + self.initial_btc * fair;
+        let if_held_btc = self.initial_btc + self.initial_usd / fair;
 
-        let if_held_dollars = initial_dollars + initial_btc * fair;
-        let if_held_btc = initial_btc + initial_dollars / fair;
+        let up = self.position.get_total_position(fair) - if_held_dollars;
 
         format!(
             "{}{}",
@@ -679,10 +683,9 @@ impl Tactic {
                                   self.position.dollars_available,self.position.coins_available);
                     }
                     li(first?=true, class="item") {
-                        : format!("If just held: {:.2}, total usd, {:.4} total btc. Up {:.2} usd, {:.4} btc",
+                        : format!("If just held: {:.2}, total usd, {:.4} total btc. Up {:.2} usd, without fees {:.2}",
                                   if_held_dollars, if_held_btc,
-                                  self.position.get_total_position(fair) - if_held_dollars,
-                                  (self.position.get_total_position(fair) / fair) - if_held_btc);
+                                  up, up + self.fees_paid);
                     }
                     li(first?=false, class="item") {
                         : format!("Desired: {:.2} usd, {:.4} btc",
