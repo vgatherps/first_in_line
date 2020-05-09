@@ -320,10 +320,6 @@ impl<'a> Tactic<'a> {
 
     // TODO this will panic on a race? Doesn't seem to be an issue
     pub fn ack_cancel_for(&mut self, cancel: &OrderCanceled) {
-        println!(
-            "Acking cancel for order {} price {} amount {}",
-            cancel.id, cancel.price, cancel.amount
-        );
         self.statistics.orders_canceled += 1;
         let cents = convert_price_cents(cancel.price);
         match cancel.side {

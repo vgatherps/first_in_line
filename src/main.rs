@@ -7,7 +7,7 @@
 
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
-    coinbase_connection, okex_connection, OkexType,
+    coinbase_connection, okex_connection, OkexType, huobi_connection, HuobiType
 };
 
 use crate::exchange::normalized::*;
@@ -135,6 +135,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let okex_spot = okex_connection(OkexType::Spot);
             let okex_swap = okex_connection(OkexType::Swap);
             let okex_quarterly = okex_connection(OkexType::Quarterly);
+            let huobi = huobi_connection(HuobiType::Spot);
             let coinbase = coinbase_connection();
 
             let (
@@ -142,6 +143,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
+                huobi,
                 coinbase,
                 mut bitstamp,
                 mut bitstamp_orders,
@@ -151,6 +153,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     okex_spot,
                     okex_swap,
                     okex_quarterly,
+                    huobi,
                     coinbase,
                     bitstamp,
                     bitstamp_orders,
@@ -169,6 +172,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
+                huobi,
                 coinbase,
                 remote_fair_value,
                 0.001,

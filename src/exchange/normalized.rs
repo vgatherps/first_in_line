@@ -17,9 +17,13 @@ pub enum Exchange {
     OkexSpot,
     OkexSwap,
     OkexQuarterly,
+    HuobiSpot,
     Coinbase,
     // Non-used by remote exchanges go below here
     COUNT,
+    // These don't seem to work for some reason
+    HuobiSwap,
+    HuobiQuarterly,
     Bitstamp,
     BitstampOrders,
     BitstampTrades,
@@ -78,22 +82,32 @@ pub struct MarketEventBlock {
 pub struct MarketDataStream {
     stream: DataStream,
     exchange: Exchange,
-    operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
+    operator: fn(Message) -> DataOrResponse,
     num_created: usize,
 }
 
 async fn lookup_stream(exchange: Exchange) -> DataStream {
     match exchange {
         Exchange::Bitmex => crate::exchange::bitmex_connection().await,
+
+        Exchange::HuobiSpot => {
+            crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Spot).await
+        },
+        Exchange::HuobiSwap => {
+            crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Swap).await
+        },
+        Exchange::HuobiQuarterly => {
+            crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Quarterly).await
+        },
         Exchange::OkexSpot => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Spot).await
-        }
+        },
         Exchange::OkexSwap => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Swap).await
-        }
+        },
         Exchange::OkexQuarterly => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Quarterly).await
-        }
+        },
         Exchange::Bitstamp => crate::exchange::bitstamp_connection().await,
         Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
         Exchange::BitstampTrades => crate::exchange::bitstamp_trades_connection().await,
@@ -103,11 +117,16 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
     .stream
 }
 
+pub enum DataOrResponse {
+    Data(SmallVec<MarketEvent>),
+    Response(Message),
+}
+
 impl MarketDataStream {
     pub fn new(
         stream: DataStream,
         exchange: Exchange,
-        operator: fn(Message, &mut DataStream) -> SmallVec<MarketEvent>,
+        operator: fn(Message) -> DataOrResponse,
     ) -> MarketDataStream {
         MarketDataStream {
             stream,
@@ -122,13 +141,26 @@ impl MarketDataStream {
         loop {
             let received = self.stream.next().await;
             if let Some(Ok(received)) = received {
-                let events = op(received, &mut self.stream);
-                if events.len() > 0 {
-                    return MarketEventBlock {
-                        events,
-                        exchange: self.exchange,
-                    };
-                }
+                match received {
+                    Message::Ping(data) => {
+                        self.stream.send(Message::Pong(data)).await.unwrap();
+                    },
+                    received => {
+                        let events = match op(received) {
+                            DataOrResponse::Response(msg) => {
+                                self.stream.send(msg).await.unwrap();
+                                continue;
+                            },
+                            DataOrResponse::Data(events) => events,
+                        };
+                        if events.len() > 0 {
+                            return MarketEventBlock {
+                                events,
+                                exchange: self.exchange,
+                            };
+                        }
+                    }
+                }   
             } else {
                 if self.num_created > 10 {
                     panic!("Had to recreate stream too many times");

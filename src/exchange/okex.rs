@@ -1,10 +1,9 @@
-use crate::exchange::{normalized, normalized::SmallVec};
+use crate::exchange::{normalized, normalized::{SmallVec, DataOrResponse}};
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
 use futures::prelude::*;
 use serde::Deserialize;
-type SmallString = smallstr::SmallString<[u8; 64]>;
 
 use std::io::prelude::Read;
 
@@ -14,8 +13,8 @@ fn price_to_cents(price: f64) -> usize {
 
 #[derive(Deserialize, Debug)]
 struct Update {
-    bids: SmallVec<[SmallString; 4]>,
-    asks: SmallVec<[SmallString; 4]>,
+    bids: SmallVec<[String; 4]>,
+    asks: SmallVec<[String; 4]>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -59,7 +58,7 @@ impl OkexType {
 
     fn get_convert(
         &self,
-    ) -> fn(Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
+    ) -> fn(Message) -> DataOrResponse {
         match self {
             OkexType::Spot => convert_spot,
             OkexType::Swap => convert_derivative,
@@ -98,23 +97,20 @@ pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
 
 fn convert_spot(
     data: Message,
-    _: &mut normalized::DataStream,
-) -> SmallVec<normalized::MarketEvent> {
-    convert_inner(data, OkexType::Spot)
+) -> DataOrResponse {
+    DataOrResponse::Data(convert_inner(data, OkexType::Spot))
 }
 
 fn convert_derivative(
     data: Message,
-    _: &mut normalized::DataStream,
-) -> SmallVec<normalized::MarketEvent> {
-    convert_inner(data, OkexType::Swap)
+) -> DataOrResponse {
+    DataOrResponse::Data(convert_inner(data, OkexType::Swap))
 }
 
 fn convert_future(
     data: Message,
-    _: &mut normalized::DataStream,
-) -> SmallVec<normalized::MarketEvent> {
-    convert_inner(data, OkexType::Quarterly)
+) -> DataOrResponse {
+    DataOrResponse::Data(convert_inner(data, OkexType::Quarterly))
 }
 
 fn convert_inner(data: Message, which: OkexType) -> SmallVec<normalized::MarketEvent> {

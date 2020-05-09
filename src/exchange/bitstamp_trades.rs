@@ -1,4 +1,4 @@
-use crate::exchange::{normalized, normalized::SmallVec};
+use crate::exchange::{normalized, normalized::{SmallVec, DataOrResponse}};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -51,10 +51,9 @@ pub async fn bitstamp_trades_connection() -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(order_stream, normalized::Exchange::BitstampTrades, convert)
 }
 
-fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
+fn convert(data: Message) -> DataOrResponse {
     let data = match data {
         Message::Text(data) => data,
-        Message::Ping(_) => return SmallVec::new(),
         other => panic!("Got bogus message: {:?}", other),
     };
     let TradeWrapper { data } = serde_json::from_str(&data).expect("Couldn't parse order");
@@ -78,5 +77,5 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized
     });
     let mut rvec = SmallVec::new();
     rvec.push(rval);
-    rvec
+    DataOrResponse::Data(rvec)
 }

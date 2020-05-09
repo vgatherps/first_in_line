@@ -1,4 +1,4 @@
-use crate::exchange::{normalized, normalized::SmallVec};
+use crate::exchange::{normalized, normalized::{SmallVec, DataOrResponse}};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -67,13 +67,13 @@ pub async fn coinbase_connection() -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, normalized::Exchange::Coinbase, convert)
 }
 
-fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
+fn convert(data: Message) -> DataOrResponse {
     let data = match data {
         Message::Text(data) => data,
         data => panic!("Incorrect message type {:?}", data),
     };
     let message = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
-    match &message {
+    DataOrResponse::Data(match &message {
         BookUpdate::Snapshot(ups) => {
             let mut result = SmallVec::new();
             result.push(normalized::MarketEvent::Clear);
@@ -113,5 +113,5 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized
                 })
             })
             .collect(),
-    }
+    })
 }

@@ -1,4 +1,4 @@
-use crate::exchange::{normalized, normalized::SmallVec};
+use crate::exchange::{normalized, normalized::{DataOrResponse, SmallVec}};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
@@ -42,7 +42,7 @@ pub async fn bitmex_connection() -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, normalized::Exchange::Bitmex, convert)
 }
 
-fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized::MarketEvent> {
+fn convert(data: Message) -> DataOrResponse {
     let data = match data {
         Message::Text(data) => data,
         data => panic!("Incorrect message type {:?}", data),
@@ -77,5 +77,5 @@ fn convert(data: Message, _: &mut normalized::DataStream) -> SmallVec<normalized
         Partial(_) => events.insert(0, normalized::MarketEvent::Clear),
         _ => (),
     };
-    events
+    DataOrResponse::Data(events)
 }

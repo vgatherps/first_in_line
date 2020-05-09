@@ -13,6 +13,7 @@ pub struct RemoteVenueAggregator {
     okex_spot: MarketDataStream,
     okex_swap: MarketDataStream,
     okex_quarterly: MarketDataStream,
+    huobi: MarketDataStream,
     coinbase: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
     fairs: [f64; Exchange::COUNT as usize],
@@ -26,6 +27,7 @@ impl RemoteVenueAggregator {
         okex_spot: MarketDataStream,
         okex_swap: MarketDataStream,
         okex_quarterly: MarketDataStream,
+        huobi: MarketDataStream,
         coinbase: MarketDataStream,
         valuer: FairValue,
         size_ratio: f64,
@@ -35,6 +37,7 @@ impl RemoteVenueAggregator {
             okex_spot,
             okex_swap,
             okex_quarterly,
+            huobi,
             coinbase,
             valuer,
             fairs: Default::default(),
@@ -80,6 +83,7 @@ impl RemoteVenueAggregator {
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
             b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
+            b = self.huobi.next().fuse() => self.update_fair_for(b),
             b = self.coinbase.next().fuse() => self.update_fair_for(b),
         }
     }
@@ -110,6 +114,9 @@ impl RemoteVenueAggregator {
                     }
                     li(first?=false, class="item") {
                         : format!("OkexQuarterly: {}", self.get_exchange_description(Exchange::OkexQuarterly))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Huobi: {}", self.get_exchange_description(Exchange::HuobiSpot))
                     }
                     li(first?=false, class="item") {
                         : format!("Coinbase: {}", self.get_exchange_description(Exchange::Coinbase))
