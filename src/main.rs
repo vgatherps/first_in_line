@@ -1,4 +1,4 @@
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 //WARNING
 //WARNING
@@ -62,6 +62,7 @@ pub enum TacticInternalEvent {
     OrderSent(bitstamp_http::OrderSent),
     SetLateStatus(Side, usize, usize),
     CancelStale(Side, usize, usize),
+    CheckGone(Side, usize, usize),
     DisplayHtml,
     Reset(bool),
 }
@@ -74,6 +75,7 @@ enum TacticEventType {
     AckCancel(bitstamp_http::OrderCanceled),
     AckSend(bitstamp_http::OrderSent),
     CancelStale(Side, usize, usize),
+    CheckGone(Side, usize, usize),
     SetLateStatus(Side, usize, usize),
     WriteHtml,
     Reset,
@@ -102,6 +104,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();
     let (html_queue, html_reader) = std::sync::mpsc::channel();
+
+    //http state lives outside of the loop to properly rate-limit requests
     let http = bitstamp_http::BitstampHttp::new(args.auth_key, args.auth_secret);
     let http = Arc::new(http);
     let html = args.html.clone();
@@ -187,6 +191,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
                         Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
                         Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
+                        Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
                         Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
                         Some(TacticInternalEvent::Reset(is_bad)) => {
                             if is_bad {
@@ -224,6 +229,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 TacticEventType::SetLateStatus(side, price, id) => {
                     tactic.set_late_status(*id, *price, *side)
                 }
+                TacticEventType::CancelStale(side, price, id) => {
+                    tactic.cancel_stale_id(*id, *price, *side)
+                }
+                TacticEventType::CheckGone(side, price, id) => {
+                    tactic.check_order_gone(*id, *price, *side)
+                }
                 TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
                 TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
                 TacticEventType::Reset => {
@@ -235,7 +246,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 TacticEventType::InsideOrders(_)
                 | TacticEventType::WriteHtml
-                | TacticEventType::CancelStale(_, _, _) => (),
+                 => (),
             }
             if let (
                 Some((((bid, _), (offer, _)), local_fair)),
@@ -261,9 +272,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     premium - expected_premium,
                                     &events,
                                     ),
-                                    TacticEventType::CancelStale(side, price, id) => {
-                                        tactic.cancel_stale_id((bid, offer), *id, *price, *side)
-                                    }
                         TacticEventType::WriteHtml => {
                             let html = format!(
                                 "
@@ -299,6 +307,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         TacticEventType::AckCancel(_)
                             | TacticEventType::AckSend(_)
                             | TacticEventType::SetLateStatus(_, _, _)
+                            | TacticEventType::CancelStale(_, _, _)
+                            | TacticEventType::CheckGone(_, _, _)
                             | TacticEventType::Reset // handled above
                             | TacticEventType::Trades(_) => (),
                     };

@@ -196,23 +196,40 @@ impl Tactic {
         }
     }
 
-    pub fn cancel_stale_id(&mut self, bbo: (usize, usize), id: usize, price: usize, side: Side) {
-        let (bid, offer) = bbo;
+    pub fn cancel_stale_id(&mut self, id: usize, price: usize, side: Side) {
         match side {
             Side::Buy => {
                 let bprice = BuyPrice::new(price);
-                if price < bid && (bid - price) > 50 && self.order_manager.cancel_buy_at(bprice, id)
+                if  self.order_manager.cancel_buy_at(bprice, id)
                 {
                     self.send_buy_cancel_for(id, bprice);
                 }
             }
             Side::Sell => {
                 let sprice = SellPrice::new(price);
-                if price > offer
-                    && (price - offer) > 50
-                    && self.order_manager.cancel_sell_at(sprice, id)
+                if self.order_manager.cancel_sell_at(sprice, id)
                 {
                     self.send_sell_cancel_for(id, sprice);
+                }
+            }
+        }
+    }
+
+    // if an order isn't gone after we canceled it, reset our state
+    pub fn check_order_gone(&mut self, id: usize, price: usize, side: Side) {
+        match side {
+            Side::Buy => {
+                let bprice = BuyPrice::new(price);
+                if self.order_manager.has_buy_order(bprice, id)
+                {
+                    self.reset();
+                }
+            }
+            Side::Sell => {
+                let sprice = SellPrice::new(price);
+                if self.order_manager.has_sell_order(sprice, id)
+                {
+                    self.reset();
                 }
             }
         }
@@ -533,6 +550,16 @@ impl Tactic {
             .await;
             assert!(sender
                 .send(crate::TacticInternalEvent::CancelStale(side, price, id))
+                .await
+                .is_ok());
+            // wait 10 more seconds, try and cancel order
+            // if it's still gone, we missed a trade and should reset
+            tokio::time::delay_for(std::time::Duration::from_millis(
+                1000 * 10 as u64,
+            ))
+            .await;
+            assert!(sender
+                .send(crate::TacticInternalEvent::CheckGone(side, price, id))
                 .await
                 .is_ok());
         });

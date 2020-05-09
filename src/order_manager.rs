@@ -144,6 +144,26 @@ impl OrderManager {
         }
     }
 
+    pub fn has_buy_order(&self, price: BuyPrice, in_id: usize) -> bool {
+        match self.buys.get(&price) {
+            Some((id, _, _, _)) if *id == in_id =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn has_sell_order(&self, price: SellPrice, in_id: usize) -> bool {
+        match self.sells.get(&price) {
+            Some((id, _, _, _)) if *id == in_id =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<f64> {
         match self.buys.get(&price) {
             Some((id, amount, stat, _)) if *id == in_id => {
