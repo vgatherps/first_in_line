@@ -1,7 +1,7 @@
 use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent};
 use crate::exchange::normalized::{convert_price_cents, Side, TradeUpdate};
 use crate::local_book::InsideOrder;
-use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
+use crate::order_book::{BuyPrice, SellPrice, SidedPrice, OrderBook};
 use crate::order_manager::OrderManager;
 use crate::position_manager::PositionManager;
 
@@ -154,9 +154,33 @@ impl<'a> Tactic<'a> {
         }
     }
 
+    fn get_filtered_bbo(
+        &self,
+        book: &OrderBook
+        ) -> (BuyPrice, SellPrice) {
+        let bids = book.bids();
+        let asks = book.asks();
+
+        // advance the book iterator until we find a level where we aren't most of it
+        // Since we wait ~3 seconds to cancel orders in this fashion, it should be relatively
+        // in-sync
+        let bid = bids.filter(|(prc, sz)| {
+            let our_size = self.order_manager.buy_size_at(**prc);
+            // inpractice, we are so small that this will be a test of alone or not
+            our_size / **sz < 0.7
+        }).next().map(|(prc, _)| *prc).unwrap_or(BuyPrice::new(1));
+        let ask = asks.filter(|(prc, sz)| {
+            let our_size = self.order_manager.sell_size_at(**prc);
+            // inpractice, we are so small that this will be a test of alone or not
+            our_size / **sz < 0.7
+        }).next().map(|(prc, _)| *prc).unwrap_or(SellPrice::new(1000*1000*1000));
+
+        (bid, ask)
+    }
+
     pub fn handle_book_update(
         &mut self,
-        bbo: (usize, usize),
+        book: &OrderBook,
         fair: f64,
         adjust: f64,
         premium_imbalance: f64,
@@ -180,7 +204,7 @@ impl<'a> Tactic<'a> {
                 break;
             }
         }
-        let (bid, offer) = (BuyPrice::new(bbo.0), SellPrice::new(bbo.1));
+        let (bid, offer) = self.get_filtered_bbo(book);
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
             if price < bid && (price.unsigned() - bid.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_buy_at(price, id));

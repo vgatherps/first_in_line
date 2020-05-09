@@ -262,7 +262,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         => (),
                 }
                 if let (
-                    Some((((bid, _), (offer, _)), local_fair)),
+                    Some((_, local_fair)),
                     Some((displacement_val, expected_premium)),
                     Some(remote_fair),
                     ) = (
@@ -274,12 +274,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         match &event_type {
                             TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
                                 .handle_book_update(
-                                    (bid, offer),
+                                    local_book.book(),
                                     local_fair,
                                     displacement_val,
                                     premium - expected_premium,
                                     ),
-                                    TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
+                            TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
                                         local_fair,
                                         displacement_val,
                                         premium - expected_premium,

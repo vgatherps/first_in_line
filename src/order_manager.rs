@@ -164,6 +164,14 @@ impl OrderManager {
         }
     }
 
+    pub fn buy_size_at(&self, price: BuyPrice) -> f64 {
+        self.buys.get(&price).map(|(_, sz, _, _)| *sz).unwrap_or(0.0)
+    }
+
+    pub fn sell_size_at(&self, price: SellPrice) -> f64 {
+        self.sells.get(&price).map(|(_, sz, _, _)| *sz).unwrap_or(0.0)
+    }
+
     pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<f64> {
         match self.buys.get(&price) {
             Some((id, amount, stat, _)) if *id == in_id => {

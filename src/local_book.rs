@@ -33,6 +33,10 @@ impl LocalBook {
         self.tob
     }
 
+    pub fn book(&self) -> &OrderBook {
+        &self.book
+    }
+
     pub fn handle_book_update(&mut self, events: &SmallVec<MarketEvent>) {
         for event in events {
             self.book.handle_book_event(event);
