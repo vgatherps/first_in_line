@@ -157,7 +157,8 @@ impl MarketDataStream {
                     Message::Ping(data) => {
                         let _ = self.stream.send(Message::Pong(data)).await;
                         continue;
-                    }
+                    },
+                    Message::Pong(_) => continue,
                     received => {
                         let events = match op(received) {
                             DataOrResponse::Response(msg) => {
