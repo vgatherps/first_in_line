@@ -40,6 +40,7 @@ impl SidedPrice for BuyPrice {
         assert!(self.value <= 0);
         (self.value * -1) as usize
     }
+
     fn to_buy(&self) -> BuyPrice {
         *self
     }

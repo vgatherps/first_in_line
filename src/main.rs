@@ -29,6 +29,7 @@ mod displacement;
 mod ema;
 mod exchange;
 mod fair_value;
+mod fifo_pnl;
 mod local_book;
 mod order_book;
 mod order_manager;

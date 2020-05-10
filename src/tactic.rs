@@ -26,6 +26,8 @@ pub struct TacticStatistics {
     traded_dollars: f64,
 
     recent_trades: VecDeque<(Side, f64, f64)>,
+
+    fifo: crate::fifo_pnl::Fifo,
 }
 
 impl TacticStatistics {
@@ -38,6 +40,7 @@ impl TacticStatistics {
             trades: 0,
             traded_dollars: 0.0,
             recent_trades: VecDeque::new(),
+            fifo: Default::default(),
 
             initial_usd,
             initial_btc,
@@ -632,6 +635,7 @@ impl<'a> Tactic<'a> {
             self.statistics
                 .recent_trades
                 .push_front((Side::Buy, dollars, trade.size));
+            self.statistics.fifo.add_buy(BuyPrice::new(cents), trade.size);
 
             println!(
                 "Trade buy id {} price {:.2} size {:.5}",
@@ -649,6 +653,7 @@ impl<'a> Tactic<'a> {
             self.statistics
                 .recent_trades
                 .push_front((Side::Sell, dollars, trade.size));
+            self.statistics.fifo.add_sell(SellPrice::new(cents), trade.size);
             println!(
                 "Trade sell id {} price {:.2} size {:.5}",
                 trade.sell_order_id, dollars, trade.size
@@ -742,10 +747,9 @@ impl<'a> Tactic<'a> {
         let imbalance = self.position.get_position_imbalance(fair);
 
         let if_held_dollars = self.statistics.initial_usd + self.statistics.initial_btc * fair;
-        let if_held_btc = self.statistics.initial_btc + self.statistics.initial_usd / fair;
 
         let up = self.position.get_total_position(fair) - if_held_dollars;
-
+        let trading_fees = self.statistics.fifo.dollars() * self.position.get_fee_estimate();
         format!(
             "{}{}",
             html! {
@@ -762,8 +766,12 @@ impl<'a> Tactic<'a> {
                                   self.position.dollars_available,self.position.coins_available);
                     }
                     li(first?=true, class="item") {
-                        : format!("If just held: {:.2}, total usd, {:.4} total btc. Up {:.2} usd, without fees {:.2}",
-                                  if_held_dollars, if_held_btc,
+                        : format!("Matched trading pnl with {:.2} and without {:.2} fees",
+                                  self.statistics.fifo.pnl() - trading_fees,
+                                  self.statistics.fifo.pnl());
+                    }
+                    li(first?=true, class="item") {
+                        : format!("Position up {:.2} usd, without fees {:.2}",
                                   up, up + self.statistics.fees_paid);
                     }
                     li(first?=false, class="item") {
