@@ -2,6 +2,7 @@ use crate::exchange::{
     normalized,
     normalized::{DataOrResponse, SmallVec},
 };
+type SmallString = smallstr::SmallString<[u8; 64]>;
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
@@ -16,8 +17,8 @@ fn price_to_cents(price: f64) -> usize {
 
 #[derive(Deserialize, Debug)]
 struct Update {
-    bids: SmallVec<[String; 4]>,
-    asks: SmallVec<[String; 4]>,
+    bids: SmallVec<[SmallString; 4]>,
+    asks: SmallVec<[SmallString; 4]>,
 }
 
 #[derive(Deserialize, Debug)]

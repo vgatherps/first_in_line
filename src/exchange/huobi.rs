@@ -126,9 +126,16 @@ fn convert_inner(data: Message, which: HuobiType) -> DataOrResponse {
     };
 
     // Let's only check on small messages
-    if data.len() < 40 && data.contains("ping") {
-        let pong = data.replace("ping", "pong");
-        return DataOrResponse::Response(Message::Text(pong));
+    // // small messages aren' a snapshot, and to be honest I'm not sure what huobi is sending
+    // maybe it's like bybit which sends the subscription ack out-of-sync, since this only happens
+    // on reset
+    if data.len() < 100 {
+        if data.contains("ping") {
+            let pong = data.replace("ping", "pong");
+            return DataOrResponse::Response(Message::Text(pong));
+        } else {
+            return DataOrResponse::Data(SmallVec::new());
+        }
     }
     let message: UpdateWrapper = serde_json::from_str(&data).expect("Couldn't parse huobi message");
     let mut result = SmallVec::new();

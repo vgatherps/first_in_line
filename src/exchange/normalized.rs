@@ -18,6 +18,8 @@ pub enum Exchange {
     OkexSwap,
     OkexQuarterly,
     HuobiSpot,
+    BybitUSDT,
+    BybitInverse,
     Coinbase,
     // Non-used by remote exchanges go below here
     COUNT,
@@ -112,6 +114,12 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
         Exchange::BitstampTrades => crate::exchange::bitstamp_trades_connection().await,
         Exchange::Coinbase => crate::exchange::coinbase_connection().await,
+        Exchange::BybitUSDT => {
+            crate::exchange::bybit_connection(crate::exchange::bybit::BybitType::USDT).await
+        }
+        Exchange::BybitInverse => {
+            crate::exchange::bybit_connection(crate::exchange::bybit::BybitType::Inverse).await
+        }
         Exchange::COUNT => panic!("Not valid to do this lookup"),
     }
     .stream

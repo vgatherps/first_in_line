@@ -7,7 +7,8 @@
 
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
-    coinbase_connection, huobi_connection, okex_connection, HuobiType, OkexType,
+    bybit_connection, coinbase_connection, huobi_connection, okex_connection, BybitType, HuobiType,
+    OkexType,
 };
 
 use crate::exchange::normalized::*;
@@ -138,37 +139,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // and is part of the reset cycle
             let position = position_manager::PositionManager::create(http.clone()).await;
 
-            let bitstamp = bitstamp_connection();
-            let bitstamp_orders = bitstamp_orders_connection();
-            let bitstamp_trades = bitstamp_trades_connection();
-            let bitmex = bitmex_connection();
-            let okex_spot = okex_connection(OkexType::Spot);
-            let okex_swap = okex_connection(OkexType::Swap);
-            let okex_quarterly = okex_connection(OkexType::Quarterly);
-            let huobi = huobi_connection(HuobiType::Spot);
-            let coinbase = coinbase_connection();
-
+            
             let (
-                bitmex,
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                huobi,
-                coinbase,
                 mut bitstamp,
                 mut bitstamp_orders,
                 mut bitstamp_trades,
-            ) = join!(
+
                 bitmex,
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
+                bybit_usdt,
+                bybit_inverse,
                 huobi,
                 coinbase,
-                bitstamp,
-                bitstamp_orders,
-                bitstamp_trades
-            );
+
+                ) = join!(
+                    bitstamp_connection(),
+                    bitstamp_orders_connection(),
+                    bitstamp_trades_connection(),
+                    bitmex_connection(),
+                    okex_connection(OkexType::Spot),
+                    okex_connection(OkexType::Swap),
+                    okex_connection(OkexType::Quarterly),
+                    bybit_connection(BybitType::USDT),
+                    bybit_connection(BybitType::Inverse),
+                    huobi_connection(HuobiType::Spot),
+                    coinbase_connection(),
+                    );
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
@@ -183,6 +181,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
+                bybit_usdt,
+                bybit_inverse,
                 huobi,
                 coinbase,
                 remote_fair_value,
@@ -274,10 +274,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     TacticEventType::Ping => {
-                        bitstamp.ping();
-                        bitstamp_orders.ping();
-                        bitstamp_trades.ping();
-                        remote_agg.ping();
+                        let _ = join!(
+                            bitstamp.ping(),
+                            bitstamp_orders.ping(),
+                            bitstamp_trades.ping(),
+                            remote_agg.ping()
+                        );
                     }
                     TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
                 }

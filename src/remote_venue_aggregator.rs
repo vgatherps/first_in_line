@@ -7,12 +7,13 @@ use futures::{future::FutureExt, join, select};
 use horrorshow::html;
 
 // Hardcoded because futures are a bit silly for selecting variable amounts
-// TODO make each book only return async market data when it receives a valid level
 pub struct RemoteVenueAggregator {
     bitmex: MarketDataStream,
     okex_spot: MarketDataStream,
     okex_swap: MarketDataStream,
     okex_quarterly: MarketDataStream,
+    bybit_usdt: MarketDataStream,
+    bybit_inverse: MarketDataStream,
     huobi: MarketDataStream,
     coinbase: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
@@ -27,6 +28,8 @@ impl RemoteVenueAggregator {
         okex_spot: MarketDataStream,
         okex_swap: MarketDataStream,
         okex_quarterly: MarketDataStream,
+        bybit_usdt: MarketDataStream,
+        bybit_inverse: MarketDataStream,
         huobi: MarketDataStream,
         coinbase: MarketDataStream,
         valuer: FairValue,
@@ -37,6 +40,8 @@ impl RemoteVenueAggregator {
             okex_spot,
             okex_swap,
             okex_quarterly,
+            bybit_usdt,
+            bybit_inverse,
             huobi,
             coinbase,
             valuer,
@@ -85,25 +90,22 @@ impl RemoteVenueAggregator {
             b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
             b = self.huobi.next().fuse() => self.update_fair_for(b),
             b = self.coinbase.next().fuse() => self.update_fair_for(b),
+            b = self.bybit_usdt.next().fuse() => self.update_fair_for(b),
+            b = self.bybit_inverse.next().fuse() => self.update_fair_for(b),
         }
     }
 
     pub async fn ping(&mut self) {
-        let bitmex = self.bitmex.ping();
-        let okex_spot = self.okex_spot.ping();
-        let okex_swap = self.okex_swap.ping();
-        let okex_quarterly = self.okex_quarterly.ping();
-        let huobi = self.huobi.ping();
-        let coinbase = self.coinbase.ping();
-
         let _ = join!(
-            bitmex,
-            okex_spot,
-            okex_swap,
-            okex_quarterly,
-            huobi,
-            coinbase
-        );
+            self.bitmex.ping(),
+            self.okex_spot.ping(),
+            self.okex_swap.ping(),
+            self.okex_quarterly.ping(),
+            self.huobi.ping(),
+            self.coinbase.ping(),
+            self.bybit_usdt.ping(),
+            self.bybit_inverse.ping(),
+            );
     }
 
     pub fn get_exchange_description(&self, exch: Exchange) -> String {
@@ -132,6 +134,13 @@ impl RemoteVenueAggregator {
                     }
                     li(first?=false, class="item") {
                         : format!("OkexQuarterly: {}", self.get_exchange_description(Exchange::OkexQuarterly))
+                    }
+
+                    li(first?=false, class="item") {
+                        : format!("BybitUSDT: {}", self.get_exchange_description(Exchange::BybitUSDT))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("BybitInverse: {}", self.get_exchange_description(Exchange::BybitInverse))
                     }
                     li(first?=false, class="item") {
                         : format!("Huobi: {}", self.get_exchange_description(Exchange::HuobiSpot))

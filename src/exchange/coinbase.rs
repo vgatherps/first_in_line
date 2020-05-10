@@ -5,6 +5,7 @@ use crate::exchange::{
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
+type SmallString = smallstr::SmallString<[u8; 64]>;
 
 fn price_to_cents(price: f64) -> usize {
     (price * 100.0).round() as usize
@@ -28,14 +29,14 @@ impl Side {
 
 #[derive(Deserialize, Debug)]
 struct Snapshot {
-    bids: SmallVec<[String; 2]>,
-    asks: SmallVec<[String; 2]>,
+    bids: SmallVec<[SmallString; 2]>,
+    asks: SmallVec<[SmallString; 2]>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
 struct L2Update {
-    changes: SmallVec<(Side, String, String)>,
+    changes: SmallVec<(Side, SmallString, SmallString)>,
 }
 
 #[derive(Deserialize, Debug)]
