@@ -2,7 +2,7 @@ use crate::ema::Ema;
 use crate::exchange::normalized::*;
 use crate::fair_value::FairValue;
 use crate::order_book::OrderBook;
-use futures::{future::FutureExt, select};
+use futures::{future::FutureExt, join, select};
 
 use horrorshow::html;
 
@@ -86,6 +86,24 @@ impl RemoteVenueAggregator {
             b = self.huobi.next().fuse() => self.update_fair_for(b),
             b = self.coinbase.next().fuse() => self.update_fair_for(b),
         }
+    }
+
+    pub async fn ping(&mut self) {
+        let bitmex = self.bitmex.ping();
+        let okex_spot = self.okex_spot.ping();
+        let okex_swap = self.okex_swap.ping();
+        let okex_quarterly = self.okex_quarterly.ping();
+        let huobi = self.huobi.ping();
+        let coinbase = self.coinbase.ping();
+
+        let _ = join!(
+            bitmex,
+            okex_spot,
+            okex_swap,
+            okex_quarterly,
+            huobi,
+            coinbase
+        );
     }
 
     pub fn get_exchange_description(&self, exch: Exchange) -> String {

@@ -1,4 +1,7 @@
-use crate::exchange::{normalized, normalized::{SmallVec, DataOrResponse}};
+use crate::exchange::{
+    normalized,
+    normalized::{DataOrResponse, SmallVec},
+};
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
@@ -56,9 +59,7 @@ impl OkexType {
         }
     }
 
-    fn get_convert(
-        &self,
-    ) -> fn(Message) -> DataOrResponse {
+    fn get_convert(&self) -> fn(Message) -> DataOrResponse {
         match self {
             OkexType::Spot => convert_spot,
             OkexType::Swap => convert_derivative,
@@ -95,21 +96,15 @@ pub async fn okex_connection(which: OkexType) -> normalized::MarketDataStream {
     normalized::MarketDataStream::new(stream, which.exchange(), which.get_convert())
 }
 
-fn convert_spot(
-    data: Message,
-) -> DataOrResponse {
+fn convert_spot(data: Message) -> DataOrResponse {
     DataOrResponse::Data(convert_inner(data, OkexType::Spot))
 }
 
-fn convert_derivative(
-    data: Message,
-) -> DataOrResponse {
+fn convert_derivative(data: Message) -> DataOrResponse {
     DataOrResponse::Data(convert_inner(data, OkexType::Swap))
 }
 
-fn convert_future(
-    data: Message,
-) -> DataOrResponse {
+fn convert_future(data: Message) -> DataOrResponse {
     DataOrResponse::Data(convert_inner(data, OkexType::Quarterly))
 }
 

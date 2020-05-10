@@ -297,15 +297,14 @@ impl BitstampHttp {
         initial[0].id
     }
 
-    pub async fn get_open_orders(
-        &self
-        ) -> Vec<usize> {
+    pub async fn get_open_orders(&self) -> Vec<usize> {
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_millis();
 
-        let headers = self.generate_request_headers_v2("", time, "POST", "/api/v2/open_orders/btcusd/", "");
+        let headers =
+            self.generate_request_headers_v2("", time, "POST", "/api/v2/open_orders/btcusd/", "");
 
         let result = self
             .http_client
@@ -320,10 +319,11 @@ impl BitstampHttp {
 
         #[derive(Deserialize)]
         struct GetId {
-            id: String
+            id: String,
         };
 
-        serde_json::from_str::<Vec<GetId>>(&result).unwrap()
+        serde_json::from_str::<Vec<GetId>>(&result)
+            .unwrap()
             .into_iter()
             .map(|g| g.id.parse::<usize>().unwrap())
             .collect()

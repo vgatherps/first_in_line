@@ -92,22 +92,22 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
 
         Exchange::HuobiSpot => {
             crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Spot).await
-        },
+        }
         Exchange::HuobiSwap => {
             crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Swap).await
-        },
+        }
         Exchange::HuobiQuarterly => {
             crate::exchange::huobi_connection(crate::exchange::huobi::HuobiType::Quarterly).await
-        },
+        }
         Exchange::OkexSpot => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Spot).await
-        },
+        }
         Exchange::OkexSwap => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Swap).await
-        },
+        }
         Exchange::OkexQuarterly => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Quarterly).await
-        },
+        }
         Exchange::Bitstamp => crate::exchange::bitstamp_connection().await,
         Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
         Exchange::BitstampTrades => crate::exchange::bitstamp_trades_connection().await,
@@ -136,6 +136,10 @@ impl MarketDataStream {
         }
     }
 
+    pub async fn ping(&mut self) {
+        let _ = self.stream.send(Message::Ping(Vec::new())).await;
+    }
+
     pub async fn next(&mut self) -> MarketEventBlock {
         let op = self.operator;
         loop {
@@ -143,14 +147,15 @@ impl MarketDataStream {
             if let Some(Ok(received)) = received {
                 match received {
                     Message::Ping(data) => {
-                        self.stream.send(Message::Pong(data)).await.unwrap();
-                    },
+                        let _ = self.stream.send(Message::Pong(data)).await;
+                        continue;
+                    }
                     received => {
                         let events = match op(received) {
                             DataOrResponse::Response(msg) => {
                                 self.stream.send(msg).await.unwrap();
                                 continue;
-                            },
+                            }
                             DataOrResponse::Data(events) => events,
                         };
                         if events.len() > 0 {
@@ -160,7 +165,7 @@ impl MarketDataStream {
                             };
                         }
                     }
-                }   
+                }
             } else {
                 if self.num_created > 10 {
                     panic!("Had to recreate stream too many times");

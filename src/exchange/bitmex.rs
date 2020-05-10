@@ -1,4 +1,7 @@
-use crate::exchange::{normalized, normalized::{DataOrResponse, SmallVec}};
+use crate::exchange::{
+    normalized,
+    normalized::{DataOrResponse, SmallVec},
+};
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;

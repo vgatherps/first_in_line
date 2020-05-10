@@ -7,7 +7,7 @@
 
 use exchange::{
     bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
-    coinbase_connection, okex_connection, OkexType, huobi_connection, HuobiType
+    coinbase_connection, huobi_connection, okex_connection, HuobiType, OkexType,
 };
 
 use crate::exchange::normalized::*;
@@ -64,6 +64,7 @@ pub enum TacticInternalEvent {
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
     DisplayHtml,
+    Ping,
     Reset(bool),
 }
 
@@ -78,6 +79,7 @@ enum TacticEventType {
     CheckGone(Side, usize, usize),
     SetLateStatus(Side, usize, usize),
     WriteHtml,
+    Ping,
     Reset,
 }
 
@@ -88,6 +90,13 @@ async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEve
             .send(TacticInternalEvent::Reset(false))
             .await
             .is_ok());
+    }
+}
+
+async fn ping_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
+    loop {
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 30)).await;
+        assert!(event_queue.send(TacticInternalEvent::Ping).await.is_ok());
     }
 }
 
@@ -113,7 +122,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let test_position = position_manager::PositionManager::create(http.clone()).await;
 
-    let mut statistics = tactic::TacticStatistics::new(test_position.dollars_balance, test_position.coins_balance);
+    let mut statistics =
+        tactic::TacticStatistics::new(test_position.dollars_balance, test_position.coins_balance);
 
     drop(test_position);
 
@@ -148,21 +158,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mut bitstamp,
                 mut bitstamp_orders,
                 mut bitstamp_trades,
-                ) = join!(
-                    bitmex,
-                    okex_spot,
-                    okex_swap,
-                    okex_quarterly,
-                    huobi,
-                    coinbase,
-                    bitstamp,
-                    bitstamp_orders,
-                    bitstamp_trades
-                    );
+            ) = join!(
+                bitmex,
+                okex_spot,
+                okex_swap,
+                okex_quarterly,
+                huobi,
+                coinbase,
+                bitstamp,
+                bitstamp_orders,
+                bitstamp_trades
+            );
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
             tokio::task::spawn(reset_loop(event_queue.clone()));
+            tokio::task::spawn(ping_loop(event_queue.clone()));
 
             let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
             let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
@@ -176,7 +187,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 coinbase,
                 remote_fair_value,
                 0.001,
-                );
+            );
 
             let mut local_book = local_book::LocalBook::new(local_fair_value);
 
@@ -190,7 +201,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &mut statistics,
                 http.clone(),
                 event_queue.clone(),
-                );
+            );
 
             loop {
                 if DIE.load(Ordering::Relaxed) {
@@ -214,6 +225,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 TacticEventType::Reset
                             },
+                            Some(TacticInternalEvent::Ping) => TacticEventType::Ping,
                             None => panic!("event queue died"),
                         },
                         trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
@@ -261,37 +273,41 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         // Do a reset
                         break;
                     }
-                    TacticEventType::InsideOrders(_)
-                        | TacticEventType::WriteHtml
-                        => (),
+                    TacticEventType::Ping => {
+                        bitstamp.ping();
+                        bitstamp_orders.ping();
+                        bitstamp_trades.ping();
+                        remote_agg.ping();
+                    }
+                    TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
                 }
                 if let (
                     Some((_, local_fair)),
                     Some((displacement_val, expected_premium)),
                     Some(remote_fair),
-                    ) = (
-                        local_book.get_local_tob(),
-                        displacement.get_displacement(),
-                        remote_agg.calculate_fair(),
-                        ) {
-                        let premium = local_fair - remote_fair;
-                        match &event_type {
-                            TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
-                                .handle_book_update(
-                                    local_book.book(),
-                                    local_fair,
-                                    displacement_val,
-                                    premium - expected_premium,
-                                    ),
-                            TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
-                                        local_fair,
-                                        displacement_val,
-                                        premium - expected_premium,
-                                        &events,
-                                        ),
-                                        TacticEventType::WriteHtml => {
-                                            let html = format!(
-                                                "
+                ) = (
+                    local_book.get_local_tob(),
+                    displacement.get_displacement(),
+                    remote_agg.calculate_fair(),
+                ) {
+                    let premium = local_fair - remote_fair;
+                    match &event_type {
+                        TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
+                            .handle_book_update(
+                                local_book.book(),
+                                local_fair,
+                                displacement_val,
+                                premium - expected_premium,
+                            ),
+                        TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
+                            local_fair,
+                            displacement_val,
+                            premium - expected_premium,
+                            &events,
+                        ),
+                        TacticEventType::WriteHtml => {
+                            let html = format!(
+                                "
                         <!DOCYPE html>
                         <html>
                         <head>
@@ -310,35 +326,35 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         </body>
                         </html>
                         ",
-                        start = start,
-                        now = Local::now(),
-                        tactic = tactic.get_html_info(local_fair),
-                        local = local_book.get_html_info(),
-                        remote = remote_agg.get_html_info(),
-                        displacement = displacement.get_html_info(),
-                        http = http.get_html_info(),
-                        );
-                                            html_queue.send(html).expect("Couldn't send html");
-                                        }
-                            // Already handled
-                            TacticEventType::AckCancel(_)
-                                | TacticEventType::AckSend(_)
-                                | TacticEventType::SetLateStatus(_, _, _)
-                                | TacticEventType::CancelStale(_, _, _)
-                                | TacticEventType::CheckGone(_, _, _)
-                                | TacticEventType::Reset // handled above
-                                | TacticEventType::Trades(_) => (),
-                        };
-                    }
+                                start = start,
+                                now = Local::now(),
+                                tactic = tactic.get_html_info(local_fair),
+                                local = local_book.get_html_info(),
+                                remote = remote_agg.get_html_info(),
+                                displacement = displacement.get_html_info(),
+                                http = http.get_html_info(),
+                            );
+                            html_queue.send(html).expect("Couldn't send html");
+                        }
+
+                        // Already handled
+                        TacticEventType::AckCancel(_)
+                        | TacticEventType::AckSend(_)
+                        | TacticEventType::SetLateStatus(_, _, _)
+                        | TacticEventType::CancelStale(_, _, _)
+                        | TacticEventType::CheckGone(_, _, _)
+                        | TacticEventType::Reset
+                        | TacticEventType::Ping
+                        | TacticEventType::Trades(_) => (),
+                    };
+                }
             }
         }
 
         // We keep the state in the destructor to ensure everything exits cleanly
         println!("Resetting time {}", bad_runs_count);
         assert!(bad_runs_count <= 5);
-        tokio::spawn(async move {
-            while let Some(_) = event_reader.recv().await {}
-        });
+        tokio::spawn(async move { while let Some(_) = event_reader.recv().await {} });
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
     }
 }

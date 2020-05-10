@@ -1,4 +1,7 @@
-use crate::exchange::{normalized, normalized::{DataOrResponse, SmallVec}};
+use crate::exchange::{
+    normalized,
+    normalized::{DataOrResponse, SmallVec},
+};
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::GzDecoder;
@@ -60,9 +63,7 @@ impl HuobiType {
         }
     }
 
-    fn get_convert(
-        &self,
-    ) -> fn(Message) -> DataOrResponse {
+    fn get_convert(&self) -> fn(Message) -> DataOrResponse {
         match self {
             HuobiType::Spot => convert_spot,
             HuobiType::Swap => convert_derivative,
@@ -99,22 +100,15 @@ pub async fn huobi_connection(which: HuobiType) -> normalized::MarketDataStream 
     normalized::MarketDataStream::new(stream, which.exchange(), which.get_convert())
 }
 
-fn convert_spot(
-    data: Message,
-) -> DataOrResponse {
+fn convert_spot(data: Message) -> DataOrResponse {
     convert_inner(data, HuobiType::Spot)
 }
 
-fn convert_derivative(
-    data: Message,
-) ->DataOrResponse {
+fn convert_derivative(data: Message) -> DataOrResponse {
     convert_inner(data, HuobiType::Swap)
 }
 
-fn convert_future(
-    data: Message,
-
-) -> DataOrResponse {
+fn convert_future(data: Message) -> DataOrResponse {
     convert_inner(data, HuobiType::Quarterly)
 }
 
@@ -137,7 +131,7 @@ fn convert_inner(data: Message, which: HuobiType) -> DataOrResponse {
         return DataOrResponse::Response(Message::Text(pong));
     }
     let message: UpdateWrapper = serde_json::from_str(&data).expect("Couldn't parse huobi message");
-    let mut result = SmallVec::new(); 
+    let mut result = SmallVec::new();
     result.push(normalized::MarketEvent::Clear);
 
     message.tick.bids.into_iter().for_each(|[price, size]| {

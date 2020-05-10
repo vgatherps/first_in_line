@@ -1,7 +1,7 @@
 use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent};
 use crate::exchange::normalized::{convert_price_cents, Side, TradeUpdate};
 use crate::local_book::InsideOrder;
-use crate::order_book::{BuyPrice, SellPrice, SidedPrice, OrderBook};
+use crate::order_book::{BuyPrice, OrderBook, SellPrice, SidedPrice};
 use crate::order_manager::OrderManager;
 use crate::position_manager::PositionManager;
 
@@ -134,7 +134,6 @@ impl<'a> Tactic<'a> {
         http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
-
         Tactic {
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
@@ -154,29 +153,34 @@ impl<'a> Tactic<'a> {
         }
     }
 
-    fn get_filtered_bbo(
-        &self,
-        book: &OrderBook
-        ) -> (BuyPrice, SellPrice) {
+    fn get_filtered_bbo(&self, book: &OrderBook) -> (BuyPrice, SellPrice) {
         let bids = book.bids();
         let asks = book.asks();
 
         // advance the book iterator until we find a level where we aren't most of it
         // Since we wait ~3 seconds to cancel orders in this fashion, it should be relatively
         // in-sync
-        let bid = bids.filter(|(prc, dollars)| {
-            let our_size = self.order_manager.buy_size_at(**prc);
-            let our_dollars = our_size * prc.unsigned() as f64;
-            // order manager thinks in dollars, we think in coins
-            // inpractice, we are so small that this will be a test of alone or not
-            our_dollars / **dollars < 0.7
-        }).next().map(|(prc, _)| *prc).unwrap_or(BuyPrice::new(0));
-        let ask = asks.filter(|(prc, dollars)| {
-            let our_size = self.order_manager.sell_size_at(**prc);
-            let our_dollars = our_size * prc.unsigned() as f64;
-            // inpractice, we are so small that this will be a test of alone or not
-            our_dollars / **dollars < 0.7
-        }).next().map(|(prc, _)| *prc).unwrap_or(SellPrice::new(1000*1000*1000*1000usize));
+        let bid = bids
+            .filter(|(prc, dollars)| {
+                let our_size = self.order_manager.buy_size_at(**prc);
+                let our_dollars = our_size * prc.unsigned() as f64;
+                // order manager thinks in dollars, we think in coins
+                // inpractice, we are so small that this will be a test of alone or not
+                our_dollars / **dollars < 0.7
+            })
+            .next()
+            .map(|(prc, _)| *prc)
+            .unwrap_or(BuyPrice::new(0));
+        let ask = asks
+            .filter(|(prc, dollars)| {
+                let our_size = self.order_manager.sell_size_at(**prc);
+                let our_dollars = our_size * prc.unsigned() as f64;
+                // inpractice, we are so small that this will be a test of alone or not
+                our_dollars / **dollars < 0.7
+            })
+            .next()
+            .map(|(prc, _)| *prc)
+            .unwrap_or(SellPrice::new(1000 * 1000 * 1000 * 1000usize));
 
         (bid, ask)
     }
@@ -246,15 +250,13 @@ impl<'a> Tactic<'a> {
         match side {
             Side::Buy => {
                 let bprice = BuyPrice::new(price);
-                if  self.order_manager.cancel_buy_at(bprice, id)
-                {
+                if self.order_manager.cancel_buy_at(bprice, id) {
                     self.send_buy_cancel_for(id, bprice);
                 }
             }
             Side::Sell => {
                 let sprice = SellPrice::new(price);
-                if self.order_manager.cancel_sell_at(sprice, id)
-                {
+                if self.order_manager.cancel_sell_at(sprice, id) {
                     self.send_sell_cancel_for(id, sprice);
                 }
             }
@@ -266,15 +268,13 @@ impl<'a> Tactic<'a> {
         match side {
             Side::Buy => {
                 let bprice = BuyPrice::new(price);
-                if self.order_manager.has_buy_order(bprice, id)
-                {
+                if self.order_manager.has_buy_order(bprice, id) {
                     self.reset();
                 }
             }
             Side::Sell => {
                 let sprice = SellPrice::new(price);
-                if self.order_manager.has_sell_order(sprice, id)
-                {
+                if self.order_manager.has_sell_order(sprice, id) {
                     self.reset();
                 }
             }
@@ -364,7 +364,10 @@ impl<'a> Tactic<'a> {
     fn reset(&self) {
         let mut not = self.main_loop_not.clone();
         tokio::task::spawn(async move {
-            assert!(not.send(crate::TacticInternalEvent::Reset(true)).await.is_ok());
+            assert!(not
+                .send(crate::TacticInternalEvent::Reset(true))
+                .await
+                .is_ok());
         });
     }
 
@@ -600,10 +603,7 @@ impl<'a> Tactic<'a> {
 
             // wait 10 more seconds, try and cancel order
             // if it's still gone, we missed a trade and should reset
-            tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * 10 as u64,
-            ))
-            .await;
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10 as u64)).await;
             assert!(sender
                 .send(crate::TacticInternalEvent::CheckGone(side, price, id))
                 .await
@@ -629,7 +629,8 @@ impl<'a> Tactic<'a> {
             self.statistics.fees_paid += fee;
             self.statistics.trades += 1;
             self.statistics.traded_dollars += dollars * trade.size;
-            self.statistics.recent_trades
+            self.statistics
+                .recent_trades
                 .push_front((Side::Buy, dollars, trade.size));
 
             println!(
@@ -645,7 +646,8 @@ impl<'a> Tactic<'a> {
             self.statistics.fees_paid += fee;
             self.statistics.trades += 1;
             self.statistics.traded_dollars += dollars * trade.size;
-            self.statistics.recent_trades
+            self.statistics
+                .recent_trades
                 .push_front((Side::Sell, dollars, trade.size));
             println!(
                 "Trade sell id {} price {:.2} size {:.5}",
