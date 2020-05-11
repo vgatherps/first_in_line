@@ -184,12 +184,11 @@ impl<'a> Tactic<'a> {
         // advance the book iterator until we find a level where we aren't most of it
         // Since we wait ~3 seconds to cancel orders in this fashion, it should be relatively
         // in-sync
+        // Find any BBO where we aren't a tiny little participant
         let bid = bids
             .filter(|(prc, size)| {
                 let our_size = self.order_manager.buy_size_at(**prc) as f64;
-                // order manager thinks in dollars, we think in coins
-                // inpractice, we are so small that this will be a test of alone or not
-                our_size / **size < 0.7
+                our_size / **size < 0.1
             })
             .next()
             .map(|(prc, _)| *prc)
@@ -197,8 +196,7 @@ impl<'a> Tactic<'a> {
         let ask = asks
             .filter(|(prc, size)| {
                 let our_size = self.order_manager.sell_size_at(**prc) as f64;
-                // inpractice, we are so small that this will be a test of alone or not
-                our_size / **size < 0.7
+                our_size / **size < 0.1
             })
             .next()
             .map(|(prc, _)| *prc)
