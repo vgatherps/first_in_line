@@ -352,7 +352,7 @@ impl<'a> Tactic<'a> {
                     .order_manager
                     .ack_buy_cancel(BuyPrice::new(cents), cancel.id)
                 {
-                    if cancel.amount >= known_volume {
+                    if cancel.amount > known_volume {
                         println!(
                             "Got buy cancel for {}, only have {}",
                             cancel.amount, known_volume
@@ -369,7 +369,7 @@ impl<'a> Tactic<'a> {
                     .order_manager
                     .ack_sell_cancel(SellPrice::new(cents), cancel.id)
                 {
-                    if cancel.amount >= known_volume {
+                    if cancel.amount > known_volume {
                         println!(
                             "Got sell cancel for {}, only have {}",
                             cancel.amount, known_volume
@@ -406,7 +406,7 @@ impl<'a> Tactic<'a> {
         side: Side,
     ) -> bool {
         let around = around + self.get_position_imbalance_cost(around);
-        let required_diff = (self.required_fees + self.required_profit) * self.cancel_mult * prc;
+        let required_diff = (self.required_fees + self.required_profit * self.cancel_mult) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
