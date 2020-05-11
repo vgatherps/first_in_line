@@ -87,7 +87,7 @@ async fn order_caller(
         }
     });
     let send = SystemTime::now();
-    let sent = http
+    let _ = http
         .send_order(amount, price, clid, side, http.clone())
         .await;
     let cents = (price * 100.0).round() as usize;
@@ -99,12 +99,12 @@ async fn order_caller(
             .await
             .is_ok());
 
-        // wait 120ish more seconds, try and cancel order
+        // wait 360ish more seconds, try and cancel order
         // Now that there's better protection against a wall of stale orders at the top,
         // this is a lot less important
         let random_offset = (clid / 19) % 4;
         tokio::time::delay_for(std::time::Duration::from_millis(
-            1000 * (120 + random_offset) as u64,
+            1000 * (360 + random_offset) as u64,
         ))
         .await;
         assert!(eventer
@@ -112,7 +112,7 @@ async fn order_caller(
             .await
             .is_ok());
 
-        // wait 10 more seconds, try and cancel order
+        // wait 10 more seconds
         // if it's still gone, we missed a trade and should reset
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10 as u64)).await;
         assert!(eventer
