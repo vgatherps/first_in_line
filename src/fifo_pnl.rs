@@ -65,13 +65,13 @@ impl Fifo {
             if *buy_size > size {
                 let size_to_trade = size;
                 self.pnl_btc += difference * size_to_trade as f64;
-                self.xbt_traded += (sellp + buyp) * size_to_trade as f64;
+                self.xbt_traded += (1.0 / sellp + 1.0 / buyp) * size_to_trade as f64;
                 *buy_size -= size;
                 return;
             } else {
                 let size_to_trade = *buy_size;
                 self.pnl_btc += difference * size_to_trade as f64;
-                self.xbt_traded += (sellp + buyp) * size_to_trade as f64;
+                self.xbt_traded += (1.0 / sellp + 1.0 / buyp) * size_to_trade as f64;
                 size -= *buy_size;
 
                 self.buys.pop_front();

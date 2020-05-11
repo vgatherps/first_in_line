@@ -221,19 +221,21 @@ impl BitmexHttp {
         spawn_decrement_task(parent);
 
         let mut result = if let Some(since) = since {
-            self
-            .http_client
-            .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
-            .form(&[("startTime", since.as_str()), ("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
-            .build()
-            .unwrap()
+            self.http_client
+                .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
+                .form(&[
+                    ("startTime", since.as_str()),
+                    ("filter", "{\"execType\": \"Trade\"}"),
+                    ("reverse", "true"),
+                ])
+                .build()
+                .unwrap()
         } else {
-            self
-            .http_client
-            .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
-            .form(&[("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
-            .build()
-            .unwrap()
+            self.http_client
+                .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
+                .form(&[("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
+                .build()
+                .unwrap()
         };
 
         let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
@@ -360,11 +362,7 @@ impl BitmexHttp {
         if !status.is_success() {
             panic!(
                 "Failed with message {:?}, \nprice {}, size {}, side {:?}, clid {}",
-                text,
-                price,
-                amount,
-                side,
-                client_id
+                text, price, amount, side, client_id
             );
         }
         true

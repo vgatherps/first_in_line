@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 mod args;
 mod bitmex_http;
@@ -148,9 +148,13 @@ async fn transaction_loop(
     let mut seen_qty = HashMap::new();
     while myloop == LOOP.load(Ordering::Relaxed) {
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
-        let (new_last_seen, transactions) = get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
+        let (new_last_seen, transactions) =
+            get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
         last_seen = new_last_seen;
-        let mut transactions: SmallVec<_> = transactions.into_iter().filter(|t| !seen.contains(&t.exec_id)).collect();
+        let mut transactions: SmallVec<_> = transactions
+            .into_iter()
+            .filter(|t| !seen.contains(&t.exec_id))
+            .collect();
         for transaction in &mut transactions {
             seen.insert(transaction.exec_id.clone());
             let current_cum_qty = seen_qty.entry(transaction.order_id).or_insert(0usize);
