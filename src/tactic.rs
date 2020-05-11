@@ -253,7 +253,8 @@ impl<'a> Tactic<'a> {
         }
         let (bid, offer) = self.get_filtered_bbo(book);
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
-            if price < bid && (price.unsigned() - bid.unsigned()) > 1 {
+            let size_at = book.get_buy_size(price);
+            if price <= bid && size_at <= 50_000.0 || (price > bid && size_at <= 100_000.0) {
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -261,7 +262,8 @@ impl<'a> Tactic<'a> {
             }
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
-            if price < offer && (offer.unsigned() - price.unsigned()) > 1 {
+            let size_at = book.get_sell_size(price);
+            if price <= offer && size_at <= 50_000.0 || (price > offer && size_at <= 100_000.0) {
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {

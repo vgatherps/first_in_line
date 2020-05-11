@@ -178,7 +178,11 @@ impl OrderBook {
         self.asks.iter()
     }
 
-    pub fn last_seen(&self) -> usize {
-        self.last_update
+    pub fn get_buy_size(&self, price: BuyPrice) -> f64 {
+        self.bids.get(&price).map(|f| *f).unwrap_or(0.0)
+    }
+
+    pub fn get_sell_size(&self, price: SellPrice) -> f64 {
+        self.asks.get(&price).map(|f| *f).unwrap_or(0.0)
     }
 }
