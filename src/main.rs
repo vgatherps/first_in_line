@@ -22,6 +22,8 @@ use std::sync::Arc;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use std::collections::HashSet;
+
 mod args;
 mod bitmex_http;
 mod displacement;
@@ -39,8 +41,6 @@ mod tactic;
 use fair_value::*;
 
 pub static DIE: AtomicBool = AtomicBool::new(false);
-
-const START: &str = "2020-05-11T02:00:08.834Z";
 
 fn html_writer(filename: String, requests: mpsc::Receiver<String>) {
     while let Ok(request) = requests.recv() {
@@ -112,21 +112,26 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
 }
 
 async fn get_max_timestamp(
-    last_seen: String,
+    last_seen: Option<String>,
     http: Arc<bitmex_http::BitmexHttp>,
 ) -> (String, SmallVec<bitmex_http::Transaction>) {
     let transactions = http
         .request_transactions_from(last_seen.clone(), http.clone())
         .await;
+    let last_seen_filter = if let Some(ls) = last_seen {
+        ls
+    } else {
+        String::new()
+    };
     let transactions: SmallVec<_> = transactions
         .into_iter()
-        .filter(|t| t.timestamp > last_seen)
+        .filter(|t| t.timestamp > last_seen_filter)
         .collect();
     let last_seen = transactions
         .iter()
         .map(|t| t.timestamp.clone())
         .max()
-        .unwrap_or(last_seen);
+        .unwrap_or(last_seen_filter);
     (last_seen, transactions)
 }
 
@@ -135,10 +140,16 @@ async fn transaction_loop(
     http: Arc<bitmex_http::BitmexHttp>,
     mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
 ) {
+    let mut seen = HashSet::new();
     loop {
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
-        let (new_last_seen, transactions) = get_max_timestamp(last_seen, http.clone()).await;
+        let (new_last_seen, transactions) = get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
+        println!("Got transactions {:?}, \ny last seen {}, new {}", transactions, last_seen, new_last_seen);
         last_seen = new_last_seen;
+        let transactions: SmallVec<_> = transactions.into_iter().filter(|t| !seen.contains(&t.order_id)).collect();
+        for transaction in &transactions {
+            seen.insert(transaction.order_id);
+        }
         if transactions.len() > 0 {
             assert!(event_queue
                 .send(TacticInternalEvent::Trades(transactions))
@@ -202,7 +213,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             tokio::task::spawn(reset_loop(event_queue.clone()));
             tokio::task::spawn(ping_loop(event_queue.clone()));
             tokio::task::spawn(transaction_loop(
-                get_max_timestamp(START.into(), http.clone()).await.0,
+                get_max_timestamp(None, http.clone()).await.0,
                 http.clone(),
                 event_queue.clone(),
             ));

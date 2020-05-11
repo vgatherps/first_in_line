@@ -31,6 +31,7 @@ impl PositionManager {
     pub fn sell(&mut self, xbt: usize) {
         let xbt = xbt as isize;
         self.sells_outstanding -= xbt;
+        println!("Got sell for {} xbt", xbt);
         assert!(self.sells_outstanding >= 0);
         self.total_contracts -= xbt;
     }

@@ -209,17 +209,26 @@ impl BitmexHttp {
 
     pub async fn request_transactions_from(
         &self,
-        since: String,
+        since: Option<String>,
         parent: Arc<BitmexHttp>,
     ) -> Vec<Transaction> {
         spawn_decrement_task(parent);
 
-        let mut result = self
+        let mut result = if let Some(since) = since {
+            self
             .http_client
             .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
-            .form(&[("startTime", since)])
+            .form(&[("startTime", since.as_str()), ("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
             .build()
-            .unwrap();
+            .unwrap()
+        } else {
+            self
+            .http_client
+            .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
+            .form(&[("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
+            .build()
+            .unwrap()
+        };
 
         let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
 
@@ -239,7 +248,6 @@ impl BitmexHttp {
         //so I hash them... and assume there won't be conflicts in 64-bit space
         let inner: Vec<InnerTransaction> =
             serde_json::from_str(&result).expect("Couldn't parse transaction data");
-
         inner
             .into_iter()
             .filter(|t| t.exec_type == "Trade")
@@ -284,6 +292,7 @@ impl BitmexHttp {
         let order: [InnerOrderCanceled; 1] =
             serde_json::from_str(&result).expect("Couldn't parse cancel response");
         let order = &order[0];
+        println!("Cancel text is {}", result);
         assert!(order.amount_traded <= order.amount_order);
         Some(OrderCanceled {
             price: order.price,
