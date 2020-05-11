@@ -20,7 +20,7 @@ use structopt::StructOpt;
 
 use std::sync::Arc;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use std::collections::{HashSet, HashMap};
 
@@ -41,6 +41,7 @@ mod tactic;
 use fair_value::*;
 
 pub static DIE: AtomicBool = AtomicBool::new(false);
+pub static LOOP: AtomicUsize = AtomicUsize::new(0);
 
 fn html_writer(filename: String, requests: mpsc::Receiver<String>) {
     while let Ok(request) = requests.recv() {
@@ -123,8 +124,10 @@ async fn get_max_timestamp(
     } else {
         String::new()
     };
+    // We must reverse the transactions to go from oldest to newest
     let transactions: SmallVec<_> = transactions
         .into_iter()
+        .rev()
         .filter(|t| t.timestamp > last_seen_filter)
         .collect();
     let last_seen = transactions
@@ -140,12 +143,12 @@ async fn transaction_loop(
     http: Arc<bitmex_http::BitmexHttp>,
     mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
 ) {
+    let myloop = LOOP.load(Ordering::Relaxed);
     let mut seen = HashSet::new();
     let mut seen_qty = HashMap::new();
-    loop {
+    while myloop == LOOP.load(Ordering::Relaxed) {
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
         let (new_last_seen, transactions) = get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
-        println!("Got transactions {:?}, \ny last seen {}, new {}", transactions, last_seen, new_last_seen);
         last_seen = new_last_seen;
         let mut transactions: SmallVec<_> = transactions.into_iter().filter(|t| !seen.contains(&t.exec_id)).collect();
         for transaction in &mut transactions {
@@ -393,6 +396,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // We keep the state in the destructor to ensure everything exits cleanly
         println!("Resetting time {}", bad_runs_count);
         assert!(bad_runs_count <= 5);
+        LOOP.fetch_add(1, Ordering::SeqCst);
         tokio::spawn(async move { while let Some(_) = event_reader.recv().await {} });
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 2)).await;
     }

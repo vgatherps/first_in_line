@@ -297,10 +297,10 @@ impl BitmexHttp {
 
         let result = self.http_client.execute(result).await.unwrap();
         let result = result.text().await.unwrap();
+        println!("Cancel text is {}", result);
         let order: [InnerOrderCanceled; 1] =
             serde_json::from_str(&result).expect("Couldn't parse cancel response");
         let order = &order[0];
-        println!("Cancel text is {}", result);
         assert!(order.amount_traded <= order.amount_order);
         Some(OrderCanceled {
             price: order.price,
