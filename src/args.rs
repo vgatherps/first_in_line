@@ -11,7 +11,7 @@ pub struct Arguments {
     #[structopt(long, help = "HTML summary file output")]
     pub html: String,
 
-    #[structopt(long, default_value = "0.03", help = "Fee per making trades in bps")]
+    #[structopt(long, default_value = "-0.025", help = "Fee per making trades in bps")]
     pub fee_bps: f64,
 
     #[structopt(long, default_value = "0.03", help = "Profit required per trade")]

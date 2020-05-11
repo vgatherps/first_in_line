@@ -1,120 +1,80 @@
-use crate::bitstamp_http::BitstampHttp;
+use crate::bitmex_http::BitmexHttp;
 
 #[derive(Debug)]
 pub struct PositionManager {
-    pub coins_balance: f64,
-    pub dollars_balance: f64,
-
-    pub coins_available: f64,
-    pub dollars_available: f64,
+    pub total_contracts: isize,
+    pub buys_outstanding: isize,
+    pub sells_outstanding: isize,
 
     fee: f64,
 }
-fn compare_ge(a: f64, b: f64) -> bool {
-    (a + 0.00001) >= b
-}
 
 impl PositionManager {
-    pub async fn create(http: std::sync::Arc<BitstampHttp>) -> PositionManager {
+    pub async fn create(http: std::sync::Arc<BitmexHttp>) -> PositionManager {
         http.cancel_all(http.clone()).await;
-        let (coins_balance, dollars_balance, fee) = http.request_positions().await;
+        let initial_xbt_balance = http.request_positions(http.clone()).await;
         PositionManager {
-            coins_balance,
-            dollars_balance,
-            coins_available: coins_balance,
-            dollars_available: dollars_balance,
-            fee: fee / 100.0,
+            total_contracts: initial_xbt_balance,
+            buys_outstanding: 0,
+            sells_outstanding: 0,
+            fee: -0.025 * 0.01,
         }
     }
 
-    fn validate(&self) {
-        if self.coins_balance >= 0.0
-            && self.coins_available >= 0.0
-            && self.dollars_balance >= 0.0
-            && self.dollars_available >= 0.0
-            && compare_ge(self.coins_balance, self.coins_available)
-            && compare_ge(self.dollars_balance, self.dollars_available)
-        {
-
-        } else {
-            panic!("Bad internal state {:?}", self);
-        }
+    pub fn buy(&mut self, xbt: usize) {
+        let xbt = xbt as isize;
+        self.buys_outstanding -= xbt;
+        assert!(self.buys_outstanding >= 0);
+        self.total_contracts += xbt;
     }
 
-    pub fn buy_coins(&mut self, coins: f64, price: f64) {
-        let dollars = coins * price;
-        // Here, I do my own fee management to keep things
-        let dollars = dollars * (1.0 + self.fee); // when buying, fee is added into dollar charge
-        self.coins_balance += coins;
-        self.coins_available += coins;
-        self.dollars_balance -= dollars;
-        self.validate();
-    }
-
-    pub fn sell_coins(&mut self, coins: f64, price: f64) {
-        let dollars = coins * price;
-        let dollars = dollars * (1.0 - self.fee); // when selling, fee is removed from incoming dollars
-        self.coins_balance -= coins;
-
-        self.dollars_available += dollars;
-        self.dollars_balance += dollars;
-        self.validate();
+    pub fn sell(&mut self, xbt: usize) {
+        let xbt = xbt as isize;
+        self.sells_outstanding -= xbt;
+        assert!(self.sells_outstanding >= 0);
+        self.total_contracts -= xbt;
     }
 
     pub fn get_fee_estimate(&self) -> f64 {
         self.fee
     }
 
-    pub fn return_buy_balance(&mut self, dollars: f64) {
-        self.dollars_available += dollars * (1.0 + self.fee);
-        self.validate();
+    pub fn return_buy_balance(&mut self, xbt: usize) {
+        let xbt = xbt as isize;
+        self.buys_outstanding -= xbt;
     }
 
-    pub fn request_buy_balance(&mut self, dollars: f64) -> bool {
-        if dollars * (1.0 + 2.0 * self.fee) < self.dollars_available {
-            self.dollars_available -= dollars * (1.0 + self.fee);
-            self.validate();
+    pub fn request_buy_balance(&mut self, xbt: usize) -> bool {
+        let xbt = xbt as isize;
+        if (self.buys_outstanding + xbt) < 5000 {
+            self.buys_outstanding += xbt;
             true
         } else {
             false
         }
     }
 
-    pub fn return_sell_balance(&mut self, coins: f64) {
-        self.coins_available += coins;
-        self.validate();
+    pub fn return_sell_balance(&mut self, xbt: usize) {
+        let xbt = xbt as isize;
+        self.sells_outstanding -= xbt;
     }
 
-    pub fn request_sell_balance(&mut self, coins: f64) -> bool {
-        if coins < self.coins_available {
-            self.coins_available -= coins;
-            self.validate();
+    pub fn request_sell_balance(&mut self, xbt: usize) -> bool {
+        let xbt = xbt as isize;
+        if (self.sells_outstanding + xbt) < 5000 {
+            self.sells_outstanding += xbt;
             true
         } else {
             false
         }
     }
 
-    pub fn get_total_position(&self, coins_price: f64) -> f64 {
-        self.validate();
-        let coins_usd = self.coins_balance * coins_price;
-        coins_usd + self.dollars_balance
-    }
-
-    pub fn get_desired_position(&self, coins_price: f64) -> (f64, f64) {
-        self.validate();
-        let coins_usd = self.coins_balance * coins_price;
-        let total_capital = coins_usd + self.dollars_balance;
-        let desired_dollars = total_capital * 0.5;
-        (desired_dollars, desired_dollars / coins_price)
+    pub fn get_desired_position(&self) -> isize {
+        0
     }
 
     // we want to be 50/50 split
-    pub fn get_position_imbalance(&self, coins_price: f64) -> f64 {
-        self.validate();
-        let coins_usd = self.coins_balance * coins_price;
-        let total_capital = coins_usd + self.dollars_balance;
-        let desired_dollars = total_capital * 0.5;
-        self.dollars_balance - desired_dollars
+    pub fn get_position_imbalance(&self) -> isize {
+        self.total_contracts
     }
 }

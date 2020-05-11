@@ -13,7 +13,6 @@ pub fn convert_price_cents(price: f64) -> usize {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(C)]
 pub enum Exchange {
-    Bitmex,
     OkexSpot,
     OkexSwap,
     OkexQuarterly,
@@ -23,12 +22,11 @@ pub enum Exchange {
     Coinbase,
     // Non-used by remote exchanges go below here
     COUNT,
+    // This is the local exchange
+    Bitmex,
     // These don't seem to work for some reason
     HuobiSwap,
     HuobiQuarterly,
-    Bitstamp,
-    BitstampOrders,
-    BitstampTrades,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Debug, Copy, Clone)]
@@ -54,14 +52,6 @@ pub struct OrderUpdate {
     pub exchange_time: usize,
 }
 
-pub struct TradeUpdate {
-    pub cents: usize,
-    pub size: f64,
-    pub sell_order_id: usize,
-    pub buy_order_id: usize,
-    pub side: Side,
-}
-
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -72,7 +62,6 @@ pub struct BookUpdate {
 pub enum MarketEvent {
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
-    TradeUpdate(TradeUpdate),
     Clear,
 }
 
@@ -110,9 +99,6 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         Exchange::OkexQuarterly => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Quarterly).await
         }
-        Exchange::Bitstamp => crate::exchange::bitstamp_connection().await,
-        Exchange::BitstampOrders => crate::exchange::bitstamp_orders_connection().await,
-        Exchange::BitstampTrades => crate::exchange::bitstamp_trades_connection().await,
         Exchange::Coinbase => crate::exchange::coinbase_connection().await,
         Exchange::BybitUSDT => {
             crate::exchange::bybit_connection(crate::exchange::bybit::BybitType::USDT).await
@@ -157,7 +143,7 @@ impl MarketDataStream {
                     Message::Ping(data) => {
                         let _ = self.stream.send(Message::Pong(data)).await;
                         continue;
-                    },
+                    }
                     Message::Pong(_) => continue,
                     received => {
                         let events = match op(received) {

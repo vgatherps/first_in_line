@@ -21,8 +21,8 @@ pub enum CancelAlone {
 
 #[derive(Debug)]
 pub struct OrderManager {
-    buys: BTreeMap<BuyPrice, (usize, f64, CancelStatus, CancelAlone)>,
-    sells: BTreeMap<SellPrice, (usize, f64, CancelStatus, CancelAlone)>,
+    buys: BTreeMap<BuyPrice, (usize, usize, CancelStatus, CancelAlone)>,
+    sells: BTreeMap<SellPrice, (usize, usize, CancelStatus, CancelAlone)>,
 }
 
 impl OrderManager {
@@ -55,18 +55,18 @@ impl OrderManager {
         !contains && !crosses
     }
 
-    pub fn add_sent_order<P: SidedPrice>(&mut self, price: &P, amount: f64) -> bool {
+    pub fn add_sent_order<P: SidedPrice>(&mut self, price: &P, amount: usize, id: usize) -> bool {
         if !self.can_place_at(price) {
             return false;
         }
         match P::SIDE {
             Side::Buy => self.buys.insert(
                 price.to_buy(),
-                (0, amount, CancelStatus::Open, CancelAlone::Early),
+                (id, amount, CancelStatus::Open, CancelAlone::Early),
             ),
             Side::Sell => self.sells.insert(
                 price.to_sell(),
-                (0, amount, CancelStatus::Open, CancelAlone::Early),
+                (id, amount, CancelStatus::Open, CancelAlone::Early),
             ),
         };
         true
@@ -158,21 +158,15 @@ impl OrderManager {
         }
     }
 
-    pub fn buy_size_at(&self, price: BuyPrice) -> f64 {
-        self.buys
-            .get(&price)
-            .map(|(_, sz, _, _)| *sz)
-            .unwrap_or(0.0)
+    pub fn buy_size_at(&self, price: BuyPrice) -> usize {
+        self.buys.get(&price).map(|(_, sz, _, _)| *sz).unwrap_or(0)
     }
 
-    pub fn sell_size_at(&self, price: SellPrice) -> f64 {
-        self.sells
-            .get(&price)
-            .map(|(_, sz, _, _)| *sz)
-            .unwrap_or(0.0)
+    pub fn sell_size_at(&self, price: SellPrice) -> usize {
+        self.sells.get(&price).map(|(_, sz, _, _)| *sz).unwrap_or(0)
     }
 
-    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<f64> {
+    pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<usize> {
         match self.buys.get(&price) {
             Some((id, amount, stat, _)) if *id == in_id => {
                 assert_eq!(*stat, CancelStatus::CancelSent);
@@ -184,7 +178,7 @@ impl OrderManager {
         }
     }
 
-    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> Option<f64> {
+    pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> Option<usize> {
         match self.sells.get(&price) {
             Some((id, amount, stat, _)) if *id == in_id => {
                 assert_eq!(*stat, CancelStatus::CancelSent);
@@ -238,30 +232,10 @@ impl OrderManager {
             .map(|(k, (id, _, _, _))| (*k, *id))
     }
 
-    pub fn give_id<P: SidedPrice + Debug>(&mut self, price: &P, id: usize, amount: f64) {
-        assert_ne!(id, 0);
-        match P::SIDE {
-            Side::Buy => {
-                let price = price.to_buy();
-                let order = self.buys.get_mut(&price).unwrap();
-                assert_eq!(order.0, 0);
-                order.0 = id;
-                order.1 = amount;
-            }
-            Side::Sell => {
-                let price = price.to_sell();
-                let order = self.sells.get_mut(&price).unwrap();
-                assert_eq!(order.0, 0);
-                order.0 = id;
-                order.1 = amount;
-            }
-        };
-    }
-
     pub fn remove_liquidity_from<P: SidedPrice>(
         &mut self,
         price: &P,
-        amount: f64,
+        amount: usize,
         id: usize,
     ) -> bool {
         match P::SIDE {
@@ -270,7 +244,7 @@ impl OrderManager {
                 match self.buys.entry(price) {
                     Entry::Occupied(mut occ) if occ.get().0 == id => {
                         occ.get_mut().1 -= amount;
-                        if occ.get_mut().1 <= 0.0000001 {
+                        if occ.get_mut().1 == 0 {
                             occ.remove_entry();
                         }
                         true
@@ -278,12 +252,13 @@ impl OrderManager {
                     _ => false,
                 }
             }
+
             Side::Sell => {
                 let price = price.to_sell();
                 match self.sells.entry(price) {
                     Entry::Occupied(mut occ) if occ.get().0 == id => {
                         occ.get_mut().1 -= amount;
-                        if occ.get_mut().1 <= 0.0000001 {
+                        if occ.get_mut().1 == 0 {
                             occ.remove_entry();
                         }
                         true

@@ -8,7 +8,6 @@ use horrorshow::html;
 
 // Hardcoded because futures are a bit silly for selecting variable amounts
 pub struct RemoteVenueAggregator {
-    bitmex: MarketDataStream,
     okex_spot: MarketDataStream,
     okex_swap: MarketDataStream,
     okex_quarterly: MarketDataStream,
@@ -24,7 +23,6 @@ pub struct RemoteVenueAggregator {
 
 impl RemoteVenueAggregator {
     pub fn new(
-        bitmex: MarketDataStream,
         okex_spot: MarketDataStream,
         okex_swap: MarketDataStream,
         okex_quarterly: MarketDataStream,
@@ -36,7 +34,6 @@ impl RemoteVenueAggregator {
         size_ratio: f64,
     ) -> RemoteVenueAggregator {
         RemoteVenueAggregator {
-            bitmex,
             okex_spot,
             okex_swap,
             okex_quarterly,
@@ -84,7 +81,6 @@ impl RemoteVenueAggregator {
     // TODO think about fair spread
     pub async fn get_new_fair(&mut self) {
         select! {
-            b = self.bitmex.next().fuse() => self.update_fair_for(b),
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
             b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
@@ -97,7 +93,6 @@ impl RemoteVenueAggregator {
 
     pub async fn ping(&mut self) {
         let _ = join!(
-            self.bitmex.ping(),
             self.okex_spot.ping(),
             self.okex_swap.ping(),
             self.okex_quarterly.ping(),
@@ -105,7 +100,7 @@ impl RemoteVenueAggregator {
             self.coinbase.ping(),
             self.bybit_usdt.ping(),
             self.bybit_inverse.ping(),
-            );
+        );
     }
 
     pub fn get_exchange_description(&self, exch: Exchange) -> String {
@@ -123,9 +118,6 @@ impl RemoteVenueAggregator {
                 // attributes
                 h3(id="remote heading", class="title") : "Remote fair value summary";
                 ul(id="Fair values") {
-                    li(first?=true, class="item") {
-                        : format!("Bitmex    : {}", self.get_exchange_description(Exchange::Bitmex))
-                    }
                     li(first?=false, class="item") {
                         : format!("OkexSpot: {}", self.get_exchange_description(Exchange::OkexSpot))
                     }

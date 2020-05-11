@@ -1,5 +1,5 @@
-use crate::bitstamp_http::{BitstampHttp, OrderCanceled, OrderSent};
-use crate::exchange::normalized::{convert_price_cents, Side, TradeUpdate};
+use crate::bitmex_http::{BitmexHttp, OrderCanceled, Transaction};
+use crate::exchange::normalized::{convert_price_cents, Side};
 use crate::local_book::InsideOrder;
 use crate::order_book::{BuyPrice, OrderBook, SellPrice, SidedPrice};
 use crate::order_manager::OrderManager;
@@ -9,41 +9,33 @@ use horrorshow::html;
 use xorshift::{Rng, Xorshift128};
 
 use std::collections::VecDeque;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::atomic::Ordering;
 
 pub struct TacticStatistics {
-    fees_paid: f64,
-    initial_usd: f64,
-    initial_btc: f64,
-
     orders_sent: usize,
     orders_canceled: usize,
     missed_cancels: usize,
 
     trades: usize,
-    traded_dollars: f64,
+    traded_xbt: usize,
 
-    recent_trades: VecDeque<(Side, f64, f64)>,
+    recent_trades: VecDeque<(Side, usize, usize)>,
 
     fifo: crate::fifo_pnl::Fifo,
 }
 
 impl TacticStatistics {
-    pub fn new(initial_usd: f64, initial_btc: f64) -> TacticStatistics {
+    pub fn new() -> TacticStatistics {
         TacticStatistics {
-            fees_paid: 0.0,
             orders_sent: 0,
             orders_canceled: 0,
             missed_cancels: 0,
             trades: 0,
-            traded_dollars: 0.0,
+            traded_xbt: 0,
             recent_trades: VecDeque::new(),
             fifo: Default::default(),
-
-            initial_usd,
-            initial_btc,
         }
     }
 }
@@ -69,24 +61,24 @@ pub struct Tactic<'a> {
     rng: Xorshift128,
 
     main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
-    http: std::sync::Arc<BitstampHttp>,
-}
-
-fn adjust_coins(coins: f64) -> f64 {
-    (coins * 10000.0).round() / 10000.0
-}
-
-fn le_compare(a: f64, b: f64) -> bool {
-    (a - 0.000001) <= b
+    http: std::sync::Arc<BitmexHttp>,
 }
 
 // TODO should really care about exchange times
 
+fn get_clid() -> usize {
+    let send = SystemTime::now();
+    send.duration_since(UNIX_EPOCH)
+        .expect("backwards")
+        .as_micros() as usize
+}
+
 async fn order_caller(
-    amount: f64,
+    amount: usize,
     price: f64,
+    clid: usize,
     side: Side,
-    http: std::sync::Arc<BitstampHttp>,
+    http: std::sync::Arc<BitmexHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
     let _guard = scopeguard::guard((), |_| {
@@ -95,19 +87,48 @@ async fn order_caller(
         }
     });
     let send = SystemTime::now();
-    let sent = http.send_order(amount, price, side, http.clone()).await;
+    let sent = http
+        .send_order(amount, price, clid, side, http.clone())
+        .await;
+    let cents = (price * 100.0).round() as usize;
+    tokio::task::spawn(async move {
+        // first wait 5 seconds, and set cancelable
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
+        assert!(eventer
+            .send(crate::TacticInternalEvent::SetLateStatus(side, cents, clid))
+            .await
+            .is_ok());
+
+        // wait 120ish more seconds, try and cancel order
+        // Now that there's better protection against a wall of stale orders at the top,
+        // this is a lot less important
+        let random_offset = (clid / 19) % 4;
+        tokio::time::delay_for(std::time::Duration::from_millis(
+            1000 * (120 + random_offset) as u64,
+        ))
+        .await;
+        assert!(eventer
+            .send(crate::TacticInternalEvent::CancelStale(side, cents, clid))
+            .await
+            .is_ok());
+
+        // wait 10 more seconds, try and cancel order
+        // if it's still gone, we missed a trade and should reset
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10 as u64)).await;
+        assert!(eventer
+            .send(crate::TacticInternalEvent::CheckGone(side, cents, clid))
+            .await
+            .is_ok());
+    });
+
     if let Ok(diff) = std::time::SystemTime::now().duration_since(send) {
         println!("Send took {} ms", diff.as_millis())
     }
-    assert!(eventer
-        .send(crate::TacticInternalEvent::OrderSent(sent))
-        .await
-        .is_ok());
 }
 
 async fn cancel_caller(
     id: usize,
-    http: std::sync::Arc<BitstampHttp>,
+    http: std::sync::Arc<BitmexHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
     let _guard = scopeguard::guard((), |_| {
@@ -134,7 +155,7 @@ impl<'a> Tactic<'a> {
         cost_of_position: f64,
         position: PositionManager,
         statistics: &'a mut TacticStatistics,
-        http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
+        http: std::sync::Arc<crate::bitmex_http::BitmexHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
         Tactic {
@@ -164,22 +185,20 @@ impl<'a> Tactic<'a> {
         // Since we wait ~3 seconds to cancel orders in this fashion, it should be relatively
         // in-sync
         let bid = bids
-            .filter(|(prc, dollars)| {
-                let our_size = self.order_manager.buy_size_at(**prc);
-                let our_dollars = our_size * prc.unsigned() as f64;
+            .filter(|(prc, size)| {
+                let our_size = self.order_manager.buy_size_at(**prc) as f64;
                 // order manager thinks in dollars, we think in coins
                 // inpractice, we are so small that this will be a test of alone or not
-                our_dollars / **dollars < 0.7
+                our_size / **size < 0.7
             })
             .next()
             .map(|(prc, _)| *prc)
             .unwrap_or(BuyPrice::new(0));
         let ask = asks
-            .filter(|(prc, dollars)| {
-                let our_size = self.order_manager.sell_size_at(**prc);
-                let our_dollars = our_size * prc.unsigned() as f64;
+            .filter(|(prc, size)| {
+                let our_size = self.order_manager.sell_size_at(**prc) as f64;
                 // inpractice, we are so small that this will be a test of alone or not
-                our_dollars / **dollars < 0.7
+                our_size / **size < 0.7
             })
             .next()
             .map(|(prc, _)| *prc)
@@ -191,6 +210,7 @@ impl<'a> Tactic<'a> {
     pub fn handle_book_update(
         &mut self,
         book: &OrderBook,
+        orders: &[InsideOrder],
         fair: f64,
         adjust: f64,
         premium_imbalance: f64,
@@ -231,6 +251,9 @@ impl<'a> Tactic<'a> {
                 break;
             }
         }
+
+        self.handle_new_orders(fair, adjust, premium_imbalance, orders);
+
         while self.order_manager.num_uncanceled_buys() >= self.worry_orders_side {
             if let Some((price, id)) = self.order_manager.worst_buy_price_cancel() {
                 assert!(self.order_manager.cancel_buy_at(price, id));
@@ -331,15 +354,14 @@ impl<'a> Tactic<'a> {
                     .order_manager
                     .ack_buy_cancel(BuyPrice::new(cents), cancel.id)
                 {
-                    if !le_compare(cancel.amount, known_volume) {
+                    if cancel.amount >= known_volume {
                         println!(
                             "Got buy cancel for {}, only have {}",
                             cancel.amount, known_volume
                         );
                         self.reset();
                     }
-                    self.position
-                        .return_buy_balance(cancel.amount * cancel.price);
+                    self.position.return_buy_balance(cancel.amount);
                 } else {
                     self.statistics.missed_cancels += 1;
                 }
@@ -349,7 +371,7 @@ impl<'a> Tactic<'a> {
                     .order_manager
                     .ack_sell_cancel(SellPrice::new(cents), cancel.id)
                 {
-                    if !le_compare(cancel.amount, known_volume) {
+                    if cancel.amount >= known_volume {
                         println!(
                             "Got sell cancel for {}, only have {}",
                             cancel.amount, known_volume
@@ -375,7 +397,7 @@ impl<'a> Tactic<'a> {
     }
 
     fn get_position_imbalance_cost(&self, fair: f64) -> f64 {
-        self.position.get_position_imbalance(fair) * self.cost_of_position
+        self.position.get_position_imbalance() as f64 * self.cost_of_position
     }
 
     fn consider_order_cancel(
@@ -430,7 +452,7 @@ impl<'a> Tactic<'a> {
     // as far as I can tell, the new order stream is almost ALWAYS newer than
     // the L2 stream. hence, I don't add logic here to arbitrate between the bbo
     // and new orders for placement
-    pub fn handle_new_orders(
+    fn handle_new_orders(
         &mut self,
         fair: f64,
         adjust: f64,
@@ -443,9 +465,9 @@ impl<'a> Tactic<'a> {
         if self.statistics.orders_sent >= self.max_send {
             return;
         }
-        // shuffle +/ 50 dollars on order size
-        let base_dollars = 200.0 + (self.rng.next_f64() - 0.5) * 100.0;
-        assert!(base_dollars > 100.0);
+        // shuffle +/ 64 dollars on order size
+        let trade_xbt = 150 + (self.rng.next_u64() % 128) as usize;
+        assert!(trade_xbt > 100);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
@@ -458,46 +480,27 @@ impl<'a> Tactic<'a> {
             }
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
-            let penny_prc = buy_prc + 0.01;
-            let actual_buy_prc = if first_buy.insert_size > 0.5
-                && self.consider_order_placement(
-                    adjusted_fair,
-                    premium_imbalance,
-                    penny_prc,
-                    Side::Buy,
-                ) {
-                Some(penny_prc)
-            } else if self.consider_order_placement(
-                adjusted_fair,
-                premium_imbalance,
-                buy_prc,
-                Side::Buy,
-            ) {
-                Some(buy_prc)
-            } else {
-                None
-            };
-            if let Some(buy_prc) = actual_buy_prc {
-                let buy_coins = adjust_coins(base_dollars / buy_prc);
-                let buy_dollars = buy_coins * buy_prc;
-
+            if self.consider_order_placement(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
                 if !self
                     .order_manager
-                    .can_place_at(&BuyPrice::new(convert_price_cents(buy_prc)))
+                    .can_place_at(&BuyPrice::new(first_buy.insert_price))
                 {
                     return;
                 }
 
-                if !self.position.request_buy_balance(buy_dollars) {
+                if !self.position.request_buy_balance(trade_xbt) {
                     return;
                 }
-                if self
-                    .order_manager
-                    .add_sent_order(&BuyPrice::new(convert_price_cents(buy_prc)), buy_coins)
-                {
+                let clid = get_clid();
+                if self.order_manager.add_sent_order(
+                    &BuyPrice::new(first_buy.insert_price),
+                    trade_xbt,
+                    clid,
+                ) {
                     tokio::task::spawn(order_caller(
-                        buy_coins,
+                        trade_xbt,
                         buy_prc,
+                        clid,
                         Side::Buy,
                         self.http.clone(),
                         self.main_loop_not.clone(),
@@ -516,148 +519,82 @@ impl<'a> Tactic<'a> {
             }
             assert!(first_sell.side == Side::Sell);
             let sell_prc = first_sell.insert_price as f64 * 0.01;
-            let penny_prc = sell_prc - 0.01;
-            let actual_sell_prc = if first_sell.insert_size > 0.5
-                && self.consider_order_placement(
-                    adjusted_fair,
-                    premium_imbalance,
-                    penny_prc,
-                    Side::Sell,
-                ) {
-                Some(penny_prc)
-            } else if self.consider_order_placement(
-                adjusted_fair,
-                premium_imbalance,
-                sell_prc,
-                Side::Sell,
-            ) {
-                Some(sell_prc)
-            } else {
-                None
-            };
-            if let Some(sell_prc) = actual_sell_prc {
-                let sell_dollars = base_dollars;
-                let sell_coins = adjust_coins(sell_dollars / sell_prc);
+            if self.consider_order_placement(adjusted_fair, premium_imbalance, sell_prc, Side::Sell)
+            {
                 if !self
                     .order_manager
-                    .can_place_at(&SellPrice::new(convert_price_cents(sell_prc)))
+                    .can_place_at(&SellPrice::new(first_sell.insert_price))
                 {
                     return;
                 }
-                // TODO this only works temporarily since I don't examine trades
-                if !self.position.request_sell_balance(sell_coins) {
+                if !self.position.request_sell_balance(trade_xbt) {
                     return;
                 }
-                if self
-                    .order_manager
-                    .add_sent_order(&SellPrice::new(convert_price_cents(sell_prc)), sell_coins)
-                {
+                let clid = get_clid();
+                if self.order_manager.add_sent_order(
+                    &SellPrice::new(first_sell.insert_price),
+                    trade_xbt,
+                    clid,
+                ) {
                     tokio::task::spawn(order_caller(
-                        sell_coins,
+                        trade_xbt,
                         sell_prc,
+                        clid,
                         Side::Sell,
                         self.http.clone(),
                         self.main_loop_not.clone(),
                     ));
-                    println!("Sent SELL at {:.2} size {:.4}", sell_prc, sell_coins);
+                    println!("Sent SELL at {:.2} size {:.4}", sell_prc, trade_xbt);
                 }
             }
         }
     }
 
-    pub fn ack_send_for(&mut self, order: &OrderSent) {
-        println!("Acking send at {:.2}, {}", order.price, order.id);
-        self.statistics.orders_sent += 1;
-        let cents = convert_price_cents(order.price);
-        match order.side {
-            Side::Buy => {
-                let price = BuyPrice::new(cents);
-                self.order_manager.give_id(&price, order.id, order.amount);
-            }
-            Side::Sell => {
-                let price = SellPrice::new(cents);
-                self.order_manager.give_id(&price, order.id, order.amount);
-            }
-        }
-        let mut sender = self.main_loop_not.clone();
-        let side = order.side;
-        let price = cents;
-        let id = order.id;
-        tokio::task::spawn(async move {
-            // first wait 3 seconds, and set cancelable
-            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
-            assert!(sender
-                .send(crate::TacticInternalEvent::SetLateStatus(side, price, id))
-                .await
-                .is_ok());
-
-            // wait 60ish more seconds, try and cancel order
-            // Now that there's better protection against a wall of stale orders at the top,
-            // this is a lot less important
-            let random_offset = (id / 19) % 4;
-            tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * (60 + random_offset) as u64,
-            ))
-            .await;
-            assert!(sender
-                .send(crate::TacticInternalEvent::CancelStale(side, price, id))
-                .await
-                .is_ok());
-
-            // wait 10 more seconds, try and cancel order
-            // if it's still gone, we missed a trade and should reset
-            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 10 as u64)).await;
-            assert!(sender
-                .send(crate::TacticInternalEvent::CheckGone(side, price, id))
-                .await
-                .is_ok());
-        });
-    }
-
-    pub fn check_seen_trade(&mut self, trade: &TradeUpdate) {
+    pub fn check_seen_trade(&mut self, trade: &Transaction) {
         let cents = trade.cents;
         let as_buy = BuyPrice::new(cents);
         let as_sell = SellPrice::new(cents);
 
-        let dollars = cents as f64 * 0.01;
+        self.statistics
+            .recent_trades
+            .push_front((trade.side, trade.cents, trade.size));
+        match trade.side {
+            Side::Buy => {
+                // Our purchase succeeded, as far as we know
+                self.position.buy(trade.size);
+                self.statistics.trades += 1;
+                self.statistics.traded_xbt += trade.size;
+                self.statistics
+                    .fifo
+                    .add_buy(BuyPrice::new(cents), trade.size);
+                self.order_manager.remove_liquidity_from(
+                    &BuyPrice::new(cents),
+                    trade.size,
+                    trade.order_id,
+                );
 
-        let fee = dollars * trade.size * self.position.get_fee_estimate();
-
-        if self
-            .order_manager
-            .remove_liquidity_from(&as_buy, trade.size, trade.buy_order_id)
-        {
-            // Our purchase succeeded, as far as we know
-            self.position.buy_coins(trade.size, dollars);
-            self.statistics.fees_paid += fee;
-            self.statistics.trades += 1;
-            self.statistics.traded_dollars += dollars * trade.size;
-            self.statistics
-                .recent_trades
-                .push_front((Side::Buy, dollars, trade.size));
-            self.statistics.fifo.add_buy(BuyPrice::new(cents), trade.size);
-
-            println!(
-                "Trade buy id {} price {:.2} size {:.5}",
-                trade.sell_order_id, dollars, trade.size
-            );
-        } else if self.order_manager.remove_liquidity_from(
-            &as_sell,
-            trade.size,
-            trade.sell_order_id,
-        ) {
-            self.position.sell_coins(trade.size, dollars);
-            self.statistics.fees_paid += fee;
-            self.statistics.trades += 1;
-            self.statistics.traded_dollars += dollars * trade.size;
-            self.statistics
-                .recent_trades
-                .push_front((Side::Sell, dollars, trade.size));
-            self.statistics.fifo.add_sell(SellPrice::new(cents), trade.size);
-            println!(
-                "Trade sell id {} price {:.2} size {:.5}",
-                trade.sell_order_id, dollars, trade.size
-            );
+                println!(
+                    "Trade buy id {} price {:.2} size {:.5}",
+                    trade.order_id, trade.cents, trade.size
+                );
+            }
+            Side::Sell => {
+                self.position.sell(trade.size);
+                self.statistics.trades += 1;
+                self.statistics.traded_xbt += trade.size;
+                self.statistics
+                    .fifo
+                    .add_sell(SellPrice::new(cents), trade.size);
+                self.order_manager.remove_liquidity_from(
+                    &SellPrice::new(cents),
+                    trade.size,
+                    trade.order_id,
+                );
+                println!(
+                    "Trade sell id {} price {:.2} size {:.5}",
+                    trade.order_id, trade.cents, trade.size
+                );
+            }
         }
 
         while self.statistics.recent_trades.len() > 20 {
@@ -665,129 +602,31 @@ impl<'a> Tactic<'a> {
         }
     }
 
-    /*
-    pub fn sync_transactions(&mut self, transactions: &Vec<Transaction>) {
-        if transactions.len() == 0 {
-            return;
-        }
-
-        let min_id = transactions.iter().map(|t| t.id).min().unwrap();
-        let max_id = transactions.iter().map(|t| t.id).max().unwrap();
-
-        if min_id <= self.last_verified_transaction_id {
-            panic!("Got repeat transaction id");
-        }
-
-        let transactions_seen: HashSet<_> = transactions.iter().map(|t| t.id).collect();
-
-        self.estimated_transactions
-            .retain(|t| !transactions_seen.contains(&t.id));
-
-        let min_remaining_trade = self
-            .estimated_transactions
-            .iter()
-            .map(|t| t.id)
-            .min()
-            .unwrap_or(std::usize::MAX);
-
-        if min_remaining_trade <= max_id {
-            panic!(
-                "New set of transactions missed a trade we observed: id {}",
-                min_remaining_trade
-            );
-        }
-
-        for transaction in transactions {
-            self.fees_paid += transaction.fee;
-            println!(
-                "Got transaction prc {:.2} amount {:.2} side {:?}",
-                transaction.btc_usd, transaction.btc, transaction.side
-            );
-            let cents = convert_price_cents(transaction.btc_usd);
-            match transaction.side {
-                Side::Buy => {
-                    self.official_position.buy_coins(
-                        transaction.btc,
-                        transaction.btc_usd,
-                    );
-                    self.order_manager.remove_liquidity_from(
-                        &BuyPrice::new(cents),
-                        transaction.btc,
-                        transaction.order_id
-                    );
-                }
-                Side::Sell => {
-                    self.official_position.sell_coins(
-                        transaction.btc,
-                        transaction.btc_usd,
-                    );
-
-                    self.order_manager.remove_liquidity_from(
-                        &BuyPrice::new(cents),
-                        transaction.btc,
-                        transaction.order_id
-                    );
-                }
-            }
-        }
-
-        self.position = self.official_position.clone();
-
-        // re-apply the remaining leftover trades
-        for trade in self.estimated_transactions.iter() {
-            match trade.side {
-                Side::Buy => self.position.buy_coins(trade.amount, trade.price),
-                Side::Sell => self.position.sell_coins(trade.amount, trade.price),
-            }
-        }
-    }*/
-
     pub fn get_html_info(&self, fair: f64) -> String {
-        let (desired_d, desired_c) = self.position.get_desired_position(fair);
-        let imbalance = self.position.get_position_imbalance(fair);
+        let imbalance = self.position.get_position_imbalance();
 
-        let if_held_dollars = self.statistics.initial_usd + self.statistics.initial_btc * fair;
-
-        let up = self.position.get_total_position(fair) - if_held_dollars;
-        let trading_fees = self.statistics.fifo.dollars() * self.position.get_fee_estimate();
+        let trading_fees = self.statistics.fifo.xbt() * self.position.get_fee_estimate();
         format!(
             "{}{}",
             html! {
                 h3(id="tactic state", clas="title") : "Tactic State Summary";
                 ul(id="Tactic summary") {
                     li(first?=true, class="item") {
-                        : format!("Balance: {:.2} usd, {:.4} btc, {:.2} total usd, {:.4} total btc",
-                                  self.position.dollars_balance,self.position.coins_balance,
-                                  self.position.get_total_position(fair),
-                                  self.position.get_total_position(fair) / fair);
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Available: {:.2} usd, {:.4} btc",
-                                  self.position.dollars_available,self.position.coins_available);
+                        : format!("Balance: {} xbt contracts",
+                                  self.position.total_contracts);
                     }
                     li(first?=true, class="item") {
-                        : format!("Matched trading pnl with {:.2} and without {:.2} fees",
-                                  self.statistics.fifo.pnl() - trading_fees,
-                                  self.statistics.fifo.pnl());
-                    }
-                    li(first?=true, class="item") {
-                        : format!("Position up {:.2} usd, without fees {:.2}",
-                                  up, up + self.statistics.fees_paid);
+                        : format!("Matched trading pnl in xbt with with {:.2} and without {:.2} fees, marked to current fair",
+                                  (self.statistics.fifo.xbt() - trading_fees) * fair,
+                                  self.statistics.fifo.xbt() * fair);
                     }
                     li(first?=false, class="item") {
-                        : format!("Desired: {:.2} usd, {:.4} btc",
-                                  desired_d, desired_c);
+                        : format!("Position imbalance: {} contracts, price offset {:.3}",
+                                  imbalance, imbalance as f64 * self.cost_of_position);
                     }
                     li(first?=false, class="item") {
-                        : format!("Position imbalance: {:.2} usd, price offset {:.3}",
-                                  imbalance, imbalance * self.cost_of_position);
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Estimated fee bps: {:.2}, paid {:.2}", self.position.get_fee_estimate() * 100.0, self.statistics.fees_paid);
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Trades: {}, traded dollars: {:.2}",
-                                  self.statistics.trades, self.statistics.traded_dollars);
+                        : format!("Trades: {}, traded xbt: {:.2}",
+                                  self.statistics.trades, self.statistics.traded_xbt);
                     }
                     li(first?=false, class="item") {
                         : format!("Orders: sent {}, canceled {}, missed cancels: {}, rate {:.2}",
@@ -811,7 +650,7 @@ impl<'a> Tactic<'a> {
     }
 }
 
-async fn do_cancel_all(http: std::sync::Arc<BitstampHttp>) {
+async fn do_cancel_all(http: std::sync::Arc<BitmexHttp>) {
     http.cancel_all(http.clone()).await
 }
 

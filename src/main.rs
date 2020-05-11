@@ -6,9 +6,8 @@
 //I would not abide by all of the given practices in here in production quality trading code
 
 use exchange::{
-    bitmex_connection, bitstamp_connection, bitstamp_orders_connection, bitstamp_trades_connection,
-    bybit_connection, coinbase_connection, huobi_connection, okex_connection, BybitType, HuobiType,
-    OkexType,
+    bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
+    BybitType, HuobiType, OkexType,
 };
 
 use crate::exchange::normalized::*;
@@ -24,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod args;
-mod bitstamp_http;
+mod bitmex_http;
 mod displacement;
 mod ema;
 mod exchange;
@@ -40,6 +39,8 @@ mod tactic;
 use fair_value::*;
 
 pub static DIE: AtomicBool = AtomicBool::new(false);
+
+const START: &str = "2020-05-11T02:00:08.834Z";
 
 fn html_writer(filename: String, requests: mpsc::Receiver<String>) {
     while let Ok(request) = requests.recv() {
@@ -60,8 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub enum TacticInternalEvent {
-    OrderCanceled(bitstamp_http::OrderCanceled),
-    OrderSent(bitstamp_http::OrderSent),
+    OrderCanceled(bitmex_http::OrderCanceled),
+    Trades(SmallVec<bitmex_http::Transaction>),
     SetLateStatus(Side, usize, usize),
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
@@ -72,11 +73,9 @@ pub enum TacticInternalEvent {
 
 enum TacticEventType {
     RemoteFair,
-    LocalBook(SmallVec<MarketEvent>),
-    InsideOrders(SmallVec<local_book::InsideOrder>),
-    Trades(SmallVec<TradeUpdate>),
-    AckCancel(bitstamp_http::OrderCanceled),
-    AckSend(bitstamp_http::OrderSent),
+    LocalBook(SmallVec<local_book::InsideOrder>),
+    Trades(SmallVec<bitmex_http::Transaction>),
+    AckCancel(bitmex_http::OrderCanceled),
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
     SetLateStatus(Side, usize, usize),
@@ -111,21 +110,59 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
             .is_ok());
     }
 }
+
+async fn get_max_timestamp(
+    last_seen: String,
+    http: Arc<bitmex_http::BitmexHttp>,
+) -> (String, SmallVec<bitmex_http::Transaction>) {
+    let transactions = http
+        .request_transactions_from(last_seen.clone(), http.clone())
+        .await;
+    let transactions: SmallVec<_> = transactions
+        .into_iter()
+        .filter(|t| t.timestamp > last_seen)
+        .collect();
+    let last_seen = transactions
+        .iter()
+        .map(|t| t.timestamp.clone())
+        .max()
+        .unwrap_or(last_seen);
+    (last_seen, transactions)
+}
+
+async fn transaction_loop(
+    mut last_seen: String,
+    http: Arc<bitmex_http::BitmexHttp>,
+    mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
+) {
+    loop {
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
+        let (new_last_seen, transactions) = get_max_timestamp(last_seen, http.clone()).await;
+        last_seen = new_last_seen;
+        if transactions.len() > 0 {
+            assert!(event_queue
+                .send(TacticInternalEvent::Trades(transactions))
+                .await
+                .is_ok());
+        }
+    }
+}
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();
     let (html_queue, html_reader) = std::sync::mpsc::channel();
 
     //http state lives outside of the loop to properly rate-limit requests
-    let http = bitstamp_http::BitstampHttp::new(args.auth_key, args.auth_secret);
+    let http = bitmex_http::BitmexHttp::new(args.auth_key, args.auth_secret);
     let http = Arc::new(http);
+
     let html = args.html.clone();
     std::thread::spawn(move || html_writer(html, html_reader));
 
     let test_position = position_manager::PositionManager::create(http.clone()).await;
 
-    let mut statistics =
-        tactic::TacticStatistics::new(test_position.dollars_balance, test_position.coins_balance);
+    let mut statistics = tactic::TacticStatistics::new();
 
     drop(test_position);
 
@@ -140,13 +177,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // and is part of the reset cycle
             let position = position_manager::PositionManager::create(http.clone()).await;
 
-            
             let (
-                mut bitstamp,
-                mut bitstamp_orders,
-                mut bitstamp_trades,
-
-                bitmex,
+                mut bitmex,
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
@@ -154,31 +186,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bybit_inverse,
                 huobi,
                 coinbase,
-
-                ) = join!(
-                    bitstamp_connection(),
-                    bitstamp_orders_connection(),
-                    bitstamp_trades_connection(),
-                    bitmex_connection(),
-                    okex_connection(OkexType::Spot),
-                    okex_connection(OkexType::Swap),
-                    okex_connection(OkexType::Quarterly),
-                    bybit_connection(BybitType::USDT),
-                    bybit_connection(BybitType::Inverse),
-                    huobi_connection(HuobiType::Spot),
-                    coinbase_connection(),
-                    );
+            ) = join!(
+                bitmex_connection(),
+                okex_connection(OkexType::Spot),
+                okex_connection(OkexType::Swap),
+                okex_connection(OkexType::Quarterly),
+                bybit_connection(BybitType::USDT),
+                bybit_connection(BybitType::Inverse),
+                huobi_connection(HuobiType::Spot),
+                coinbase_connection(),
+            );
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
             tokio::task::spawn(reset_loop(event_queue.clone()));
             tokio::task::spawn(ping_loop(event_queue.clone()));
+            tokio::task::spawn(transaction_loop(
+                get_max_timestamp(START.into(), http.clone()).await.0,
+                http.clone(),
+                event_queue.clone(),
+            ));
 
             let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
             let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
 
             let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
-                bitmex,
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
@@ -210,13 +242,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let event_type = select! {
                     rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
-                    block = bitstamp.next().fuse() => TacticEventType::LocalBook(block.events),
-                    order = bitstamp_orders.next().fuse() => TacticEventType::InsideOrders(
-                        local_book.handle_new_order(&order.events)),
-                        event = event_reader.recv().fuse() => match event {
+                    block = bitmex.next().fuse() => {
+                        TacticEventType::LocalBook(local_book.handle_book_update(&block.events))
+                    },
+                    event = event_reader.recv().fuse() => match event {
                             Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
                             Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
-                            Some(TacticInternalEvent::OrderSent(send)) => TacticEventType::AckSend(send),
+                            Some(TacticInternalEvent::Trades(trades)) => TacticEventType::Trades(trades),
                             Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
                             Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
                             Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
@@ -229,13 +261,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Some(TacticInternalEvent::Ping) => TacticEventType::Ping,
                             None => panic!("event queue died"),
                         },
-                        trades = bitstamp_trades.next().fuse() => TacticEventType::Trades(
-                            trades.events.into_iter().map(|t|
-                                                          match t {
-                                                              MarketEvent::TradeUpdate(trade) => trade,
-                                                              _ => panic!("Non-trade received"),
-                                                          }).collect()
-                            ),
                 };
                 match &event_type {
                     TacticEventType::RemoteFair => {
@@ -243,8 +268,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             displacement.handle_remote(rf);
                         }
                     }
-                    TacticEventType::LocalBook(events) => {
-                        local_book.handle_book_update(&events);
+                    TacticEventType::LocalBook(_) => {
                         if let Some((_, local_fair)) = local_book.get_local_tob() {
                             displacement.handle_local(local_fair);
                         };
@@ -264,7 +288,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         tactic.check_order_gone(*id, *price, *side)
                     }
                     TacticEventType::AckCancel(cancel) => tactic.ack_cancel_for(cancel),
-                    TacticEventType::AckSend(sent) => tactic.ack_send_for(sent),
                     TacticEventType::Reset => {
                         // let in-flight items propogate
                         // We do a cancel all before we wait, and will do another after the wait
@@ -275,14 +298,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     TacticEventType::Ping => {
-                        let _ = join!(
-                            bitstamp.ping(),
-                            bitstamp_orders.ping(),
-                            bitstamp_trades.ping(),
-                            remote_agg.ping()
-                        );
+                        let _ = join!(bitmex.ping(), remote_agg.ping());
                     }
-                    TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
+                    TacticEventType::WriteHtml => (),
                 }
                 if let (
                     Some((_, local_fair)),
@@ -295,18 +313,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ) {
                     let premium = local_fair - remote_fair;
                     match &event_type {
-                        TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
-                            .handle_book_update(
-                                local_book.book(),
-                                local_fair,
-                                displacement_val,
-                                premium - expected_premium,
-                            ),
-                        TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
+                        TacticEventType::RemoteFair => tactic.handle_book_update(
+                            local_book.book(),
+                            &SmallVec::new(),
                             local_fair,
                             displacement_val,
                             premium - expected_premium,
-                            &events,
+                        ),
+                        TacticEventType::LocalBook(inside_orders) => tactic.handle_book_update(
+                            local_book.book(),
+                            &inside_orders,
+                            local_fair,
+                            displacement_val,
+                            premium - expected_premium,
                         ),
                         TacticEventType::WriteHtml => {
                             let html = format!(
@@ -342,7 +361,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                         // Already handled
                         TacticEventType::AckCancel(_)
-                        | TacticEventType::AckSend(_)
                         | TacticEventType::SetLateStatus(_, _, _)
                         | TacticEventType::CancelStale(_, _, _)
                         | TacticEventType::CheckGone(_, _, _)
