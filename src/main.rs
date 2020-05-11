@@ -86,13 +86,11 @@ enum TacticEventType {
 }
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
-    loop {
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 60 * 10)).await;
-        assert!(event_queue
+    tokio::time::delay_for(std::time::Duration::from_millis(1000 * 60 * 10)).await;
+    assert!(event_queue
             .send(TacticInternalEvent::Reset(false))
             .await
             .is_ok());
-    }
 }
 
 async fn ping_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
@@ -169,6 +167,7 @@ async fn transaction_loop(
                 .is_ok());
         }
     }
+    println!("Exiting transaction loop");
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
