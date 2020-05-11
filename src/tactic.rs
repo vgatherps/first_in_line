@@ -618,7 +618,7 @@ impl<'a> Tactic<'a> {
     pub fn get_html_info(&self, fair: f64) -> String {
         let imbalance = self.position.get_position_imbalance();
 
-        let trading_fees = self.statistics.fifo.xbt() * self.position.get_fee_estimate();
+        let trading_fees = self.statistics.fifo.xbt_traded() * self.position.get_fee_estimate();
         format!(
             "{}{}",
             html! {

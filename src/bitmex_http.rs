@@ -47,8 +47,12 @@ struct InnerTransaction {
     order_id: String,
     #[serde(rename = "execType")]
     exec_type: String,
-    #[serde(rename = "orderQty")]
-    size: usize,
+
+    #[serde(rename = "execID")]
+    exec_id: String,
+
+    #[serde(rename = "cumQty")]
+    total_exec: usize,
 
     timestamp: String,
     price: f64,
@@ -58,9 +62,11 @@ struct InnerTransaction {
 #[derive(Debug)]
 pub struct Transaction {
     pub order_id: usize,
+    pub cum_size: usize,
     pub size: usize,
     pub cents: usize,
     pub timestamp: String,
+    pub exec_id: String,
     pub side: Side,
 }
 
@@ -255,9 +261,11 @@ impl BitmexHttp {
                 Transaction {
                     // some initial and website orders won't have this
                     order_id: t.order_id.parse().unwrap_or(0),
+                    exec_id: t.exec_id,
                     cents: (t.price * 100.0).round() as usize,
-                    size: t.size,
                     timestamp: t.timestamp,
+                    cum_size: t.total_exec,
+                    size: 0,
                     side: match t.side.as_str() {
                         "Buy" => Side::Buy,
                         "Sell" => Side::Sell,

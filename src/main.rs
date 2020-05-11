@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 mod args;
 mod bitmex_http;
@@ -141,14 +141,19 @@ async fn transaction_loop(
     mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
 ) {
     let mut seen = HashSet::new();
+    let mut seen_qty = HashMap::new();
     loop {
         tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
         let (new_last_seen, transactions) = get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
         println!("Got transactions {:?}, \ny last seen {}, new {}", transactions, last_seen, new_last_seen);
         last_seen = new_last_seen;
-        let transactions: SmallVec<_> = transactions.into_iter().filter(|t| !seen.contains(&t.order_id)).collect();
-        for transaction in &transactions {
-            seen.insert(transaction.order_id);
+        let mut transactions: SmallVec<_> = transactions.into_iter().filter(|t| !seen.contains(&t.exec_id)).collect();
+        for transaction in &mut transactions {
+            seen.insert(transaction.exec_id.clone());
+            let current_cum_qty = seen_qty.entry(transaction.order_id).or_insert(0usize);
+            assert!(*current_cum_qty <= transaction.cum_size);
+            transaction.size = transaction.cum_size - *current_cum_qty;
+            *current_cum_qty = transaction.cum_size;
         }
         if transactions.len() > 0 {
             assert!(event_queue
