@@ -217,65 +217,75 @@ impl BitmexHttp {
         &self,
         since: Option<String>,
         parent: Arc<BitmexHttp>,
-    ) -> Vec<Transaction> {
-        spawn_decrement_task(parent);
+        ) -> Vec<Transaction> {
+        for _ in 0..3 {
+            spawn_decrement_task(parent.clone());
 
-        let mut result = if let Some(since) = since {
-            self.http_client
-                .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
-                .form(&[
-                    ("startTime", since.as_str()),
-                    ("filter", "{\"execType\": \"Trade\"}"),
-                    ("reverse", "true"),
-                ])
-                .build()
-                .unwrap()
-        } else {
-            self.http_client
-                .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
-                .form(&[("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
-                .build()
-                .unwrap()
-        };
+            let mut result = if let Some(since) = since.clone() {
+                self.http_client
+                    .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
+                    .form(&[
+                          ("startTime", since.as_str()),
+                          ("filter", "{\"execType\": \"Trade\"}"),
+                          ("reverse", "true"),
+                    ])
+                    .build()
+                    .unwrap()
+            } else {
+                self.http_client
+                    .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
+                    .form(&[("filter", "{\"execType\": \"Trade\"}"), ("reverse", "true")])
+                    .build()
+                    .unwrap()
+            };
 
-        let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
+            let body = std::str::from_utf8(result.body().unwrap().as_bytes().unwrap()).unwrap();
 
-        let headers =
-            self.generate_request_headers_v2(body, "GET", "/api/v1/execution/tradeHistory/");
+            let headers =
+                self.generate_request_headers_v2(body, "GET", "/api/v1/execution/tradeHistory/");
 
-        let res_headers = result.headers_mut();
-        for (name, val) in headers {
-            res_headers.insert(name.unwrap(), val);
-        }
+            let res_headers = result.headers_mut();
+            for (name, val) in headers {
+                res_headers.insert(name.unwrap(), val);
+            }
 
-        let result = self.http_client.execute(result).await.unwrap();
-        assert!(result.status().is_success());
-        let result = result.text().await.unwrap();
+            let result = self.http_client.execute(result).await.unwrap();
+            let status = result.status();
+            let result = result.text().await.unwrap();
+            // capitalized or not gateway?
+            if result.contains("ateway") {
+                // occasionally we get a bad gateway response, just wait and try again
+                tokio::time::delay_for(std::time::Duration::from_millis(10 * 1000)).await;
+                continue;
+            }
+            assert!(status.is_success());
 
-        //BIG BAD: I can't be bothered to change the code to have string order ids,
-        //so I hash them... and assume there won't be conflicts in 64-bit space
-        let inner: Vec<InnerTransaction> =
-            serde_json::from_str(&result).expect("Couldn't parse transaction data");
-        inner
-            .into_iter()
-            .filter(|t| t.exec_type == "Trade")
-            .map(|t| {
-                Transaction {
-                    // some initial and website orders won't have this
-                    order_id: t.order_id.parse().unwrap_or(0),
-                    exec_id: t.exec_id,
-                    cents: (t.price * 100.0).round() as usize,
-                    timestamp: t.timestamp,
-                    cum_size: t.total_exec,
-                    size: 0,
-                    side: match t.side.as_str() {
-                        "Buy" => Side::Buy,
-                        "Sell" => Side::Sell,
-                        _ => panic!("Got bogus side on a trade"),
-                    },
-                }
-            })
+            //BIG BAD: I can't be bothered to change the code to have string order ids,
+            //so I hash them... and assume there won't be conflicts in 64-bit space
+            let inner: Vec<InnerTransaction> =
+                serde_json::from_str(&result).expect("Couldn't parse transaction data");
+            return inner
+                .into_iter()
+                .filter(|t| t.exec_type == "Trade")
+                .map(|t| {
+                    Transaction {
+                        // some initial and website orders won't have this
+                        order_id: t.order_id.parse().unwrap_or(0),
+                        exec_id: t.exec_id,
+                        cents: (t.price * 100.0).round() as usize,
+                        timestamp: t.timestamp,
+                        cum_size: t.total_exec,
+                        size: 0,
+                        side: match t.side.as_str() {
+                            "Buy" => Side::Buy,
+                            "Sell" => Side::Sell,
+                            _ => panic!("Got bogus side on a trade"),
+                        },
+                    }
+                })
             .collect()
+        }
+        panic!("Too many transaction retries");
     }
 
     pub async fn send_cancel(&self, id: usize, parent: Arc<BitmexHttp>) -> Option<OrderCanceled> {

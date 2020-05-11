@@ -63,7 +63,7 @@ impl RemoteVenueAggregator {
         }
     }
 
-    pub fn calculate_fair(&self) -> Option<f64> {
+    pub fn calculate_fair(&self) -> Option<(f64, f64)> {
         let mut total_price = 0.0;
         let mut total_size = 0.0;
         for i in 0..(Exchange::COUNT as usize) {
@@ -75,7 +75,7 @@ impl RemoteVenueAggregator {
             total_price += self.fairs[i] * size;
             total_size += size;
         }
-        Some(total_price / total_size)
+        Some((total_price / total_size, total_size))
     }
 
     // TODO think about fair spread
@@ -141,7 +141,7 @@ impl RemoteVenueAggregator {
                         : format!("Coinbase: {}", self.get_exchange_description(Exchange::Coinbase))
                     }
                     li(first?=false, class="item") {
-                        : format!("Fair value: {}", self.calculate_fair().unwrap_or(0.0))
+                        : format!("Fair value+size: {:?}", self.calculate_fair().unwrap_or((0.0, 0.0)))
                     }
                 }
             }

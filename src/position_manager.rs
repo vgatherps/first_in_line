@@ -47,7 +47,7 @@ impl PositionManager {
 
     pub fn request_buy_balance(&mut self, xbt: usize) -> bool {
         let xbt = xbt as isize;
-        if (self.buys_outstanding + xbt) < 5000 {
+        if (self.buys_outstanding + xbt) < 20000 {
             self.buys_outstanding += xbt;
             true
         } else {
@@ -62,7 +62,7 @@ impl PositionManager {
 
     pub fn request_sell_balance(&mut self, xbt: usize) -> bool {
         let xbt = xbt as isize;
-        if (self.sells_outstanding + xbt) < 5000 {
+        if (self.sells_outstanding + xbt) < 20000 {
             self.sells_outstanding += xbt;
             true
         } else {

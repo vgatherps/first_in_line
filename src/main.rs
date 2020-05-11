@@ -289,13 +289,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match &event_type {
                     TacticEventType::RemoteFair => {
-                        if let Some(rf) = remote_agg.calculate_fair() {
-                            displacement.handle_remote(rf);
+                        if let Some((rf, rs)) = remote_agg.calculate_fair() {
+                            displacement.handle_remote(rf, rs);
                         }
                     }
                     TacticEventType::LocalBook(_) => {
-                        if let Some((_, local_fair)) = local_book.get_local_tob() {
-                            displacement.handle_local(local_fair);
+                        if let Some((_, (local_fair, local_size))) = local_book.get_local_tob() {
+                            displacement.handle_local(local_fair, local_size);
                         };
                     }
                     TacticEventType::Trades(trades) => {
@@ -328,29 +328,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     TacticEventType::WriteHtml => (),
                 }
                 if let (
-                    Some((_, local_fair)),
+                    Some((_, (local_fair, local_size))),
                     Some((displacement_val, expected_premium)),
-                    Some(remote_fair),
+                    Some((remote_fair, remote_size)),
                 ) = (
                     local_book.get_local_tob(),
                     displacement.get_displacement(),
                     remote_agg.calculate_fair(),
                 ) {
                     let premium = local_fair - remote_fair;
+                    // again, discount the displacement by size weighting.
+                    // I really need to centralize these "forecasts"
+
+                    let total_size = local_size + remote_size;
+                    let remote_adjust = remote_size / total_size;
+                    let local_adjust = local_size / total_size;
+
+                    let desired_premium = premium * local_adjust + expected_premium * remote_adjust;
+
                     match &event_type {
                         TacticEventType::RemoteFair => tactic.handle_book_update(
                             local_book.book(),
                             &SmallVec::new(),
                             local_fair,
                             displacement_val,
-                            premium - expected_premium,
+                            desired_premium,
                         ),
                         TacticEventType::LocalBook(inside_orders) => tactic.handle_book_update(
                             local_book.book(),
                             &inside_orders,
                             local_fair,
                             displacement_val,
-                            premium - expected_premium,
+                            desired_premium,
                         ),
                         TacticEventType::WriteHtml => {
                             let html = format!(

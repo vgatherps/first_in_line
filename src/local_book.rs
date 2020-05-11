@@ -6,7 +6,7 @@ use horrorshow::html;
 
 pub struct LocalBook {
     fair: FairValue,
-    tob: Option<((usize, usize), f64)>,
+    tob: Option<((usize, usize), (f64, f64))>,
     book: OrderBook,
 }
 
@@ -26,7 +26,7 @@ impl LocalBook {
         }
     }
 
-    pub fn get_local_tob(&self) -> Option<((usize, usize), f64)> {
+    pub fn get_local_tob(&self) -> Option<((usize, usize), (f64, f64))> {
         self.tob
     }
 
@@ -67,7 +67,7 @@ impl LocalBook {
                 } else {
                     SmallVec::new()
                 };
-                self.tob = Some(((bid, ask), fair.fair_price));
+                self.tob = Some(((bid, ask), (fair.fair_price, fair.fair_shares)));
                 new_levels
             }
             _ => SmallVec::new(),
@@ -75,17 +75,18 @@ impl LocalBook {
     }
 
     pub fn get_html_info(&self) -> String {
-        if let Some(((bprice, aprice), fair)) = self.tob {
+        if let Some(((bprice, aprice), (fair, size))) = self.tob {
             format!(
                 "{}",
                 html! {
                     h3(id="remote heading", class="title") : "Local fair value summary";
                     ul(id="Local book info") {
                         li(first?=true, class="item") {
-                            : format!("Local bbo: {:.2}x{:.2}, fair {:.2}",
+                            : format!("Local bbo: {:.2}x{:.2}, fair {:.2}, fair size {:.2}",
                                       bprice as f64 * 0.01,
                                       aprice as f64 * 0.01,
-                                      fair);
+                                      fair,
+                                      size);
                         }
                     }
                 }

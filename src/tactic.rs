@@ -253,8 +253,7 @@ impl<'a> Tactic<'a> {
         }
         let (bid, offer) = self.get_filtered_bbo(book);
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
-            let size_at = book.get_buy_size(price);
-            if price <= bid && size_at <= 50_000.0 || (price > bid && size_at <= 100_000.0) {
+            if price < bid && (price.unsigned() - bid.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -262,8 +261,7 @@ impl<'a> Tactic<'a> {
             }
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
-            let size_at = book.get_sell_size(price);
-            if price <= offer && size_at <= 50_000.0 || (price > offer && size_at <= 100_000.0) {
+            if price < offer && (offer.unsigned() - price.unsigned()) > 1 {
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
@@ -486,6 +484,7 @@ impl<'a> Tactic<'a> {
         }
         // shuffle +/ 64 dollars on order size
         let trade_xbt = self.base_trade_contracts + (self.rng.next_u64() % 128) as usize;
+        assert!(trade_xbt > 100);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
@@ -570,6 +569,9 @@ impl<'a> Tactic<'a> {
 
     pub fn check_seen_trade(&mut self, trade: &Transaction) {
         let cents = trade.cents;
+        let as_buy = BuyPrice::new(cents);
+        let as_sell = SellPrice::new(cents);
+
         self.statistics
             .recent_trades
             .push_front((trade.side, trade.cents, trade.size));
@@ -582,7 +584,7 @@ impl<'a> Tactic<'a> {
                 self.statistics
                     .fifo
                     .add_buy(BuyPrice::new(cents), trade.size);
-                self.order_manager.remove_liquidity_from(
+                let removed = self.order_manager.remove_liquidity_from(
                     &BuyPrice::new(cents),
                     trade.size,
                     trade.order_id,
