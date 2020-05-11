@@ -4,9 +4,6 @@ use serde::Deserialize;
 use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
-type OrderId = smallstr::SmallString<[u8; 32]>;
-type SmallString = OrderId;
-
 use horrorshow::html;
 
 use std::sync::{
@@ -18,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::exchange::normalized::Side;
 
 const MAX_NEW_ORDER: usize = 20;
-const FAIL_THRESH: usize = 55;
+const FAIL_THRESH: usize = 59;
 
 #[derive(Deserialize)]
 struct InnerOrderCanceled {
@@ -80,7 +77,7 @@ struct PartialBalance {
 }
 
 async fn decrement(http: Arc<BitmexHttp>) {
-    tokio::time::delay_for(std::time::Duration::from_millis((10 * 60 + 64) * 1000)).await;
+    tokio::time::delay_for(std::time::Duration::from_millis(61 * 1000)).await;
     http.decrement_outstanding();
 }
 
