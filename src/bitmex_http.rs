@@ -242,17 +242,18 @@ impl BitmexHttp {
             .filter(|t| t.exec_type == "Trade")
             .map(|t| {
                 Transaction {
-                // some initial and website orders won't have this
-                order_id: t.order_id.parse().unwrap_or(0),
-                cents: (t.price * 100.0).round() as usize,
-                size: t.size,
-                timestamp: t.timestamp,
-                side: match t.side.as_str() {
-                    "Buy" => Side::Buy,
-                    "Sell" => Side::Sell,
-                    _ => panic!("Got bogus side on a trade"),
-                },
-            }})
+                    // some initial and website orders won't have this
+                    order_id: t.order_id.parse().unwrap_or(0),
+                    cents: (t.price * 100.0).round() as usize,
+                    size: t.size,
+                    timestamp: t.timestamp,
+                    side: match t.side.as_str() {
+                        "Buy" => Side::Buy,
+                        "Sell" => Side::Sell,
+                        _ => panic!("Got bogus side on a trade"),
+                    },
+                }
+            })
             .collect()
     }
 
@@ -295,7 +296,7 @@ impl BitmexHttp {
         client_id: usize,
         side: Side,
         parent: Arc<BitmexHttp>,
-    ) {
+    ) -> bool {
         spawn_decrement_task(parent.clone());
         let price = ((price * 100.0).round() + 0.01) / 100.0;
         assert_eq!(price, (price * 100.0) / 100.0);
@@ -330,11 +331,22 @@ impl BitmexHttp {
         }
 
         let result = self.http_client.execute(result).await.unwrap();
-        if !result.status().is_success() {
-            panic!("Failed with message {:?}, \nprice {}, size {}, side {:?}, clid {}",
-                   result.text().await.unwrap(),
-                   price, amount, side, client_id);
+        let status = result.status();
+        let text = result.text().await;
+        if text.contains("overloaded") {
+            return false;
         }
+        if !result.status().is_success() {
+            panic!(
+                "Failed with message {:?}, \nprice {}, size {}, side {:?}, clid {}",
+                result.text().await.unwrap(),
+                price,
+                amount,
+                side,
+                client_id
+            );
+        }
+        true
     }
 
     pub fn get_html_info(&self) -> String {

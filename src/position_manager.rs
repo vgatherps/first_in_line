@@ -69,12 +69,9 @@ impl PositionManager {
         }
     }
 
-    pub fn get_desired_position(&self) -> isize {
-        0
-    }
-
-    // we want to be 50/50 split
+    // we want to be around zero, so if we're long, we push the fair down,
+    // and for sell, push it up
     pub fn get_position_imbalance(&self) -> isize {
-        self.total_contracts
+        self.total_contracts * -1
     }
 }

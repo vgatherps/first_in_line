@@ -87,9 +87,24 @@ async fn order_caller(
         }
     });
     let send = SystemTime::now();
-    let _ = http
+    if !http
         .send_order(amount, price, clid, side, http.clone())
-        .await;
+        .await
+    {
+        // We got rejected for overload
+        assert!(eventer
+            .send(crate::TacticInternalEvent::OrderCanceled(
+                crate::bitmex_http::OrderCanceled {
+                    price,
+                    amount,
+                    side,
+                    id: clid
+                }
+            ))
+            .await
+            .is_ok());
+        return;
+    }
     let cents = (price * 100.0).round() as usize;
     tokio::task::spawn(async move {
         // first wait 30 seconds, and set cancelable
