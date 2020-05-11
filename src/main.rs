@@ -244,8 +244,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut tactic = tactic::Tactic::new(
                 args.profit_bps,
+                args.profit_bps_cancel,
                 args.fee_bps,
                 args.cost_of_position,
+                args.base_trade_contracts,
                 position,
                 &mut statistics,
                 http.clone(),

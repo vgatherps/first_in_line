@@ -42,12 +42,12 @@ impl TacticStatistics {
 
 pub struct Tactic<'a> {
     required_profit: f64,
+    required_profit_cancel: f64,
     required_fees: f64,
     imbalance_adjust: f64,
 
     cost_of_position: f64,
-
-    cancel_mult: f64,
+    base_trade_contracts: usize,
 
     max_orders_side: usize,
     worry_orders_side: usize,
@@ -166,18 +166,21 @@ async fn cancel_caller(
 impl<'a> Tactic<'a> {
     pub fn new(
         profit_bps: f64,
+        profit_bps_cancel: f64,
         fee_bps: f64,
         cost_of_position: f64,
+        base_trade_contracts: usize,
         position: PositionManager,
         statistics: &'a mut TacticStatistics,
         http: std::sync::Arc<crate::bitmex_http::BitmexHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
+        assert!(profit_bps > profit_bps_cancel);
         Tactic {
-            required_profit: 0.01 * profit_bps,
-            required_fees: 0.01 * fee_bps,
+            required_profit: 0.01 * 0.01 * profit_bps,
+            required_profit_cancel: 0.01 * 0.01 * profit_bps_cancel,
+            required_fees: 0.01 * 0.01 * fee_bps,
             imbalance_adjust: 0.2,
-            cancel_mult: 0.3,
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
@@ -186,6 +189,7 @@ impl<'a> Tactic<'a> {
             rng: xorshift::thread_rng(),
             position,
             cost_of_position,
+            base_trade_contracts,
             http,
             main_loop_not,
             statistics,
@@ -421,7 +425,7 @@ impl<'a> Tactic<'a> {
         side: Side,
     ) -> bool {
         let around = around + self.get_position_imbalance_cost(around);
-        let required_diff = (self.required_fees + self.required_profit * self.cancel_mult) * prc;
+        let required_diff = (self.required_fees + self.required_profit_cancel) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
@@ -479,8 +483,7 @@ impl<'a> Tactic<'a> {
             return;
         }
         // shuffle +/ 64 dollars on order size
-        let trade_xbt = 150 + (self.rng.next_u64() % 128) as usize;
-        assert!(trade_xbt > 100);
+        let trade_xbt = self.base_trade_contracts + (self.rng.next_u64() % 128) as usize;
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
