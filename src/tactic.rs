@@ -570,9 +570,6 @@ impl<'a> Tactic<'a> {
 
     pub fn check_seen_trade(&mut self, trade: &Transaction) {
         let cents = trade.cents;
-        let as_buy = BuyPrice::new(cents);
-        let as_sell = SellPrice::new(cents);
-
         self.statistics
             .recent_trades
             .push_front((trade.side, trade.cents, trade.size));
@@ -585,7 +582,7 @@ impl<'a> Tactic<'a> {
                 self.statistics
                     .fifo
                     .add_buy(BuyPrice::new(cents), trade.size);
-                let removed = self.order_manager.remove_liquidity_from(
+                self.order_manager.remove_liquidity_from(
                     &BuyPrice::new(cents),
                     trade.size,
                     trade.order_id,
