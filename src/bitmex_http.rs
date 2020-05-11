@@ -381,7 +381,7 @@ impl BitmexHttp {
         let result = self.http_client.execute(result).await.unwrap();
         let status = result.status();
         let text = result.text().await.unwrap();
-        if text.contains("overloaded") || text.contains("Canceled: Order had execInst") {
+        if text.contains("overloaded") || text.contains("Canceled: Order had execInst") || text.contains("ateway") {
             return false;
         }
         if !status.is_success() {
