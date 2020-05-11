@@ -119,9 +119,9 @@ impl BitmexHttp {
 
     pub fn can_send_order(&self, derisk: bool) -> bool {
         if derisk {
-            self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
-        } else {
             self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER_DERISK
+        } else {
+            self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
         }
     }
 

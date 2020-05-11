@@ -107,8 +107,8 @@ async fn order_caller(
     }
     let cents = (price * 100.0).round() as usize;
     tokio::task::spawn(async move {
-        // first wait 30 seconds, and set cancelable
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 30)).await;
+        // first wait 15 seconds, and set cancelable
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 15)).await;
         assert!(eventer
             .send(crate::TacticInternalEvent::SetLateStatus(side, cents, clid))
             .await
