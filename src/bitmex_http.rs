@@ -360,6 +360,7 @@ impl BitmexHttp {
                 ("price", &format!("{:.2}", price)),
                 ("orderQty", amount),
                 ("clOrdID", client_id),
+                ("execInst", "ParticipateDoNotInitiate"),
             ))
             .build()
             .unwrap();
@@ -380,7 +381,7 @@ impl BitmexHttp {
         let result = self.http_client.execute(result).await.unwrap();
         let status = result.status();
         let text = result.text().await.unwrap();
-        if text.contains("overloaded") {
+        if text.contains("overloaded") || text.contains("Canceled: Order had execInst") {
             return false;
         }
         if !status.is_success() {
