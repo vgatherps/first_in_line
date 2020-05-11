@@ -332,14 +332,14 @@ impl BitmexHttp {
 
         let result = self.http_client.execute(result).await.unwrap();
         let status = result.status();
-        let text = result.text().await;
+        let text = result.text().await.unwrap();
         if text.contains("overloaded") {
             return false;
         }
-        if !result.status().is_success() {
+        if !status.is_success() {
             panic!(
                 "Failed with message {:?}, \nprice {}, size {}, side {:?}, clid {}",
-                result.text().await.unwrap(),
+                text,
                 price,
                 amount,
                 side,
