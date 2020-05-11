@@ -580,7 +580,7 @@ impl<'a> Tactic<'a> {
                 self.statistics
                     .fifo
                     .add_buy(BuyPrice::new(cents), trade.size);
-                self.order_manager.remove_liquidity_from(
+                let removed = self.order_manager.remove_liquidity_from(
                     &BuyPrice::new(cents),
                     trade.size,
                     trade.order_id,

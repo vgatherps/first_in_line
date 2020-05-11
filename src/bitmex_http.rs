@@ -24,7 +24,10 @@ struct InnerOrderCanceled {
     side: Side,
 
     #[serde(rename = "orderQty")]
-    amount: usize,
+    amount_order: usize,
+
+    #[serde(rename = "cumQty")]
+    amount_traded: usize,
 
     #[serde(rename = "clOrdID")]
     id: String,
@@ -281,9 +284,10 @@ impl BitmexHttp {
         let order: [InnerOrderCanceled; 1] =
             serde_json::from_str(&result).expect("Couldn't parse cancel response");
         let order = &order[0];
+        assert!(order.amount_traded <= order.amount_order);
         Some(OrderCanceled {
             price: order.price,
-            amount: order.amount,
+            amount: order.amount_order - order.amount_traded,
             id: order.id.parse().expect("Couldn't parse clordid"),
             side: order.side,
         })

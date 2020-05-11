@@ -168,7 +168,7 @@ impl OrderManager {
 
     pub fn ack_buy_cancel(&mut self, price: BuyPrice, in_id: usize) -> Option<usize> {
         match self.buys.get(&price) {
-            Some((id, amount, stat, _)) if *id == in_id => {
+            Some((id, amount, _, _)) if *id == in_id => {
                 let amount = *amount;
                 self.buys.remove(&price);
                 Some(amount)
@@ -179,7 +179,7 @@ impl OrderManager {
 
     pub fn ack_sell_cancel(&mut self, price: SellPrice, in_id: usize) -> Option<usize> {
         match self.sells.get(&price) {
-            Some((id, amount, stat, _)) if *id == in_id => {
+            Some((id, amount, _, _)) if *id == in_id => {
                 let amount = *amount;
                 self.sells.remove(&price);
                 Some(amount)
@@ -244,8 +244,10 @@ impl OrderManager {
                         occ.get_mut().1 -= amount;
                         if occ.get_mut().1 == 0 {
                             occ.remove_entry();
+                            true
+                        } else {
+                            false
                         }
-                        true
                     }
                     _ => false,
                 }
@@ -258,8 +260,10 @@ impl OrderManager {
                         occ.get_mut().1 -= amount;
                         if occ.get_mut().1 == 0 {
                             occ.remove_entry();
+                            true
+                        } else {
+                            false
                         }
-                        true
                     }
                     _ => false,
                 }
