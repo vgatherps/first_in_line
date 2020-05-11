@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::exchange::normalized::Side;
 
 const MAX_NEW_ORDER: usize = 15;
-const MAX_NEW_ORDER_DERISK: usize = 30;
+const MAX_NEW_ORDER_DERISK: usize = 45;
 const FAIL_THRESH: usize = 59;
 
 #[derive(Deserialize)]

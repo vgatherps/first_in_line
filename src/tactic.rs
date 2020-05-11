@@ -107,8 +107,8 @@ async fn order_caller(
     }
     let cents = (price * 100.0).round() as usize;
     tokio::task::spawn(async move {
-        // first wait 15 seconds, and set cancelable
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 15)).await;
+        // first wait 3 seconds, and set cancelable
+        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 3)).await;
         assert!(eventer
             .send(crate::TacticInternalEvent::SetLateStatus(side, cents, clid))
             .await
@@ -236,6 +236,7 @@ impl<'a> Tactic<'a> {
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
             let buy_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
+                println!("Cancelling because of fair");
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -245,6 +246,7 @@ impl<'a> Tactic<'a> {
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
             let sell_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, sell_prc, Side::Sell) {
+                println!("Cancelling because of fair");
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
@@ -254,7 +256,7 @@ impl<'a> Tactic<'a> {
         let (bid, offer) = self.get_filtered_bbo(book);
         while let Some((price, id)) = self.order_manager.best_buy_price_late() {
             let size_at = book.get_buy_size(price);
-            if (price <= bid && size_at <= 50_000.0) || (price > bid && size_at <= 20_000.0) {
+            if (price <= bid && size_at <= 30_000.0)  || (price > bid && size_at <= 10000.0) {
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
@@ -263,7 +265,7 @@ impl<'a> Tactic<'a> {
         }
         while let Some((price, id)) = self.order_manager.best_sell_price_late() {
             let size_at = book.get_sell_size(price);
-            if (price <= offer && size_at <= 50_000.0) || (price > offer && size_at <= 20_000.0) {
+            if (price <= offer && size_at <= 30_000.0)  || (price > offer && size_at <= 10000.0) {
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
