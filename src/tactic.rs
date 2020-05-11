@@ -478,9 +478,6 @@ impl<'a> Tactic<'a> {
         premium_imbalance: f64,
         orders: &[InsideOrder],
     ) {
-        if !self.http.can_send_order() {
-            return;
-        }
         if self.statistics.orders_sent >= self.max_send {
             return;
         }
@@ -489,6 +486,10 @@ impl<'a> Tactic<'a> {
         assert!(trade_xbt > 100);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
+
+            if !self.http.can_send_order(self.position.get_position_imbalance() > 0) {
+                return;
+            }
             if self.max_orders_side <= self.order_manager.num_buys() {
                 return;
             }
@@ -528,6 +529,9 @@ impl<'a> Tactic<'a> {
             }
         }
         if let Some(first_sell) = orders.iter().filter(|o| o.side == Side::Sell).next() {
+            if !self.http.can_send_order(self.position.get_position_imbalance() < 0) {
+                return;
+            }
             if self.max_orders_side <= self.order_manager.num_sells() {
                 return;
             }

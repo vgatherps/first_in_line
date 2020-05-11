@@ -14,7 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::exchange::normalized::Side;
 
-const MAX_NEW_ORDER: usize = 20;
+const MAX_NEW_ORDER: usize = 15;
+const MAX_NEW_ORDER_DERISK: usize = 30;
 const FAIL_THRESH: usize = 59;
 
 #[derive(Deserialize)]
@@ -90,8 +91,8 @@ async fn decrement(http: Arc<BitmexHttp>) {
     http.decrement_outstanding();
 }
 
-pub fn spawn_decrement_task(http: Arc<BitmexHttp>) {
-    http.increment_outstanding();
+async fn spawn_decrement_task(http: Arc<BitmexHttp>, wait: bool) {
+    http.increment_outstanding(wait).await;
     tokio::task::spawn(decrement(http));
 }
 
@@ -116,8 +117,12 @@ impl BitmexHttp {
         }
     }
 
-    pub fn can_send_order(&self) -> bool {
-        self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
+    pub fn can_send_order(&self, derisk: bool) -> bool {
+        if derisk {
+            self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER
+        } else {
+            self.outstanding_request_counter.load(Ordering::Relaxed) < MAX_NEW_ORDER_DERISK
+        }
     }
 
     fn decrement_outstanding(&self) {
@@ -125,12 +130,21 @@ impl BitmexHttp {
             .fetch_sub(1, Ordering::Relaxed);
     }
 
-    fn increment_outstanding(&self) {
-        assert!(
+    async fn increment_outstanding(&self, wait: bool) {
+        if wait {
+            while self.outstanding_request_counter.load(Ordering::Relaxed) >= FAIL_THRESH {
+                tokio::time::delay_for(std::time::Duration::from_millis(10)).await;
+            }
             self.outstanding_request_counter
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            assert!(
+                self.outstanding_request_counter
                 .fetch_add(1, Ordering::Relaxed)
                 < FAIL_THRESH
-        );
+                );
+        }
+        
     }
 
     fn generate_request_headers_v2(
@@ -174,7 +188,7 @@ impl BitmexHttp {
 
     // the api v1 cancel all was being weird so I do everything V2
     pub async fn cancel_all(&self, parent: Arc<Self>) {
-        spawn_decrement_task(parent.clone());
+        spawn_decrement_task(parent.clone(), true).await;
 
         let headers = self.generate_request_headers_v2("", "DELETE", "/api/v1/order/all/");
 
@@ -189,7 +203,7 @@ impl BitmexHttp {
     }
 
     pub async fn request_positions(&self, parent: Arc<Self>) -> isize {
-        spawn_decrement_task(parent.clone());
+        spawn_decrement_task(parent.clone(), true).await;
 
         let headers = self.generate_request_headers_v2("", "GET", "/api/v1/position/");
 
@@ -219,7 +233,7 @@ impl BitmexHttp {
         parent: Arc<BitmexHttp>,
         ) -> Vec<Transaction> {
         for _ in 0..3 {
-            spawn_decrement_task(parent.clone());
+            spawn_decrement_task(parent.clone(), true).await;
 
             let mut result = if let Some(since) = since.clone() {
                 self.http_client
@@ -289,7 +303,7 @@ impl BitmexHttp {
     }
 
     pub async fn send_cancel(&self, id: usize, parent: Arc<BitmexHttp>) -> Option<OrderCanceled> {
-        spawn_decrement_task(parent.clone());
+        spawn_decrement_task(parent.clone(), true).await;
 
         let mut result = self
             .http_client
@@ -330,7 +344,7 @@ impl BitmexHttp {
         side: Side,
         parent: Arc<BitmexHttp>,
     ) -> bool {
-        spawn_decrement_task(parent.clone());
+        spawn_decrement_task(parent.clone(), false).await;
         let price = ((price * 100.0).round() + 0.01) / 100.0;
         assert_eq!(price, (price * 100.0) / 100.0);
         // bitmex allows one to set the side by sending negative quantities
