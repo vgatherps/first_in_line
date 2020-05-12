@@ -75,14 +75,18 @@ impl OrderManager {
     pub fn buys_can_cancel(&self) -> impl Iterator<Item = (&BuyPrice, &usize)> {
         self.buys
             .iter()
-            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (_, _, stat, can))| {
+                *stat != CancelStatus::CancelSent && *can != CancelAlone::Early
+            })
             .map(|(k, (id, _, _, _))| (k, id))
     }
 
     pub fn sells_can_cancel(&self) -> impl Iterator<Item = (&SellPrice, &usize)> {
         self.sells
             .iter()
-            .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
+            .filter(|(_, (_, _, stat, can))| {
+                *stat != CancelStatus::CancelSent && *can != CancelAlone::Early
+            })
             .map(|(k, (id, _, _, _))| (k, id))
     }
 
