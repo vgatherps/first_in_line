@@ -88,9 +88,9 @@ enum TacticEventType {
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
     tokio::time::delay_for(std::time::Duration::from_millis(1000 * 60 * 10)).await;
     assert!(event_queue
-            .send(TacticInternalEvent::Reset(false))
-            .await
-            .is_ok());
+        .send(TacticInternalEvent::Reset(false))
+        .await
+        .is_ok());
 }
 
 async fn ping_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {

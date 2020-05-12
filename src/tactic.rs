@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::atomic::Ordering;
 
+type SmallVec<T> = smallvec::SmallVec<[T; 16]>;
+
 pub struct TacticStatistics {
     orders_sent: usize,
     orders_canceled: usize,
@@ -233,44 +235,51 @@ impl<'a> Tactic<'a> {
         premium_imbalance: f64,
     ) {
         let adjusted_fair = fair + adjust;
-        while let Some((price, id)) = self.order_manager.best_buy_price_late() {
+        while let Some((price, id)) = self.order_manager.best_buy_price_can_cancel() {
             let buy_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, buy_prc, Side::Buy) {
-                println!("Cancelling because of fair");
                 assert!(self.order_manager.cancel_buy_at(price, id));
                 self.send_buy_cancel_for(id, price);
             } else {
                 break;
             }
         }
-        while let Some((price, id)) = self.order_manager.best_sell_price_late() {
+        while let Some((price, id)) = self.order_manager.best_sell_price_can_cancel() {
             let sell_prc = price.unsigned() as f64 * 0.01;
             if self.consider_order_cancel(adjusted_fair, premium_imbalance, sell_prc, Side::Sell) {
-                println!("Cancelling because of fair");
                 assert!(self.order_manager.cancel_sell_at(price, id));
                 self.send_sell_cancel_for(id, price);
             } else {
                 break;
             }
         }
+
         let (bid, offer) = self.get_filtered_bbo(book);
-        while let Some((price, id)) = self.order_manager.best_buy_price_late() {
+
+        let mut to_cancel_buys = SmallVec::new();
+        for (price, id) in self.order_manager.buys_can_cancel() {
+            let (price, id) = (*price, *id);
             let size_at = book.get_buy_size(price);
-            if (price <= bid && size_at <= 30_000.0)  || (price > bid && size_at <= 10000.0) {
-                assert!(self.order_manager.cancel_buy_at(price, id));
-                self.send_buy_cancel_for(id, price);
-            } else {
-                break;
+            if (price <= bid && size_at <= 30_000.0) || (price > bid && size_at <= 10_000.0) {
+                to_cancel_buys.push((price, id))
             }
         }
-        while let Some((price, id)) = self.order_manager.best_sell_price_late() {
+        for (price, id) in to_cancel_buys {
+            assert!(self.order_manager.cancel_buy_at(price, id));
+            self.send_buy_cancel_for(id, price);
+        }
+
+        let mut to_cancel_sells = SmallVec::new();
+        for (price, id) in self.order_manager.sells_can_cancel() {
+            let (price, id) = (*price, *id);
             let size_at = book.get_sell_size(price);
-            if (price <= offer && size_at <= 30_000.0)  || (price > offer && size_at <= 10000.0) {
-                assert!(self.order_manager.cancel_sell_at(price, id));
-                self.send_sell_cancel_for(id, price);
-            } else {
-                break;
+            if (price <= offer && size_at <= 30_000.0) || (price > offer && size_at <= 10_000.0) {
+                to_cancel_sells.push((price, id))
             }
+        }
+        for (price, id) in to_cancel_sells {
+            assert!(self.order_manager.cancel_sell_at(price, id));
+            self.send_sell_cancel_for(id, price);
         }
 
         self.handle_new_orders(fair, adjust, premium_imbalance, orders);
@@ -417,7 +426,7 @@ impl<'a> Tactic<'a> {
         });
     }
 
-    fn get_position_imbalance_cost(&self, fair: f64) -> f64 {
+    fn get_position_imbalance_cost(&self) -> f64 {
         self.position.get_position_imbalance() as f64 * self.cost_of_position
     }
 
@@ -428,7 +437,7 @@ impl<'a> Tactic<'a> {
         prc: f64,
         side: Side,
     ) -> bool {
-        let around = around + self.get_position_imbalance_cost(around);
+        let around = around + self.get_position_imbalance_cost();
         let required_diff = (self.required_fees + self.required_profit_cancel) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
@@ -454,7 +463,7 @@ impl<'a> Tactic<'a> {
     ) -> bool {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
-        let around = around + self.get_position_imbalance_cost(around);
+        let around = around + self.get_position_imbalance_cost();
         let required_diff = (self.required_fees + self.required_profit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
@@ -488,14 +497,16 @@ impl<'a> Tactic<'a> {
         assert!(trade_xbt > 100);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
-
-            if !self.http.can_send_order(self.position.get_position_imbalance() > 0) {
+            if !self
+                .http
+                .can_send_order(self.position.get_position_imbalance() > 0)
+            {
                 return;
             }
             if self.max_orders_side <= self.order_manager.num_buys() {
                 return;
             }
-            if let Some((highest_buy, _)) = self.order_manager.best_buy_price_cancel() {
+            if let Some((highest_buy, _)) = self.order_manager.buys_can_cancel().next() {
                 if highest_buy.unsigned() >= first_buy.insert_price {
                     return;
                 }
@@ -531,13 +542,16 @@ impl<'a> Tactic<'a> {
             }
         }
         if let Some(first_sell) = orders.iter().filter(|o| o.side == Side::Sell).next() {
-            if !self.http.can_send_order(self.position.get_position_imbalance() < 0) {
+            if !self
+                .http
+                .can_send_order(self.position.get_position_imbalance() < 0)
+            {
                 return;
             }
             if self.max_orders_side <= self.order_manager.num_sells() {
                 return;
             }
-            if let Some((highest_sell, _)) = self.order_manager.best_sell_price_cancel() {
+            if let Some((highest_sell, _)) = self.order_manager.sells_can_cancel().next() {
                 if highest_sell.unsigned() <= first_sell.insert_price {
                     return;
                 }
@@ -577,8 +591,6 @@ impl<'a> Tactic<'a> {
 
     pub fn check_seen_trade(&mut self, trade: &Transaction) {
         let cents = trade.cents;
-        let as_buy = BuyPrice::new(cents);
-        let as_sell = SellPrice::new(cents);
 
         self.statistics
             .recent_trades
@@ -592,7 +604,7 @@ impl<'a> Tactic<'a> {
                 self.statistics
                     .fifo
                     .add_buy(BuyPrice::new(cents), trade.size);
-                let removed = self.order_manager.remove_liquidity_from(
+                self.order_manager.remove_liquidity_from(
                     &BuyPrice::new(cents),
                     trade.size,
                     trade.order_id,

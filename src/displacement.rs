@@ -56,7 +56,6 @@ impl Displacement {
             let remote_premium = rf - rs;
             let local_premium = lf - ls;
 
-
             // discount the remoteness by the size ratio
             let total_size = lsize + self.remote_size;
             let adjust_remote = self.remote_size / total_size;

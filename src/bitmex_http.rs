@@ -140,11 +140,10 @@ impl BitmexHttp {
         } else {
             assert!(
                 self.outstanding_request_counter
-                .fetch_add(1, Ordering::Relaxed)
-                < FAIL_THRESH
-                );
+                    .fetch_add(1, Ordering::Relaxed)
+                    < FAIL_THRESH
+            );
         }
-        
     }
 
     fn generate_request_headers_v2(
@@ -231,7 +230,7 @@ impl BitmexHttp {
         &self,
         since: Option<String>,
         parent: Arc<BitmexHttp>,
-        ) -> Vec<Transaction> {
+    ) -> Vec<Transaction> {
         for _ in 0..3 {
             spawn_decrement_task(parent.clone(), true).await;
 
@@ -239,9 +238,9 @@ impl BitmexHttp {
                 self.http_client
                     .get("https://www.bitmex.com/api/v1/execution/tradeHistory/")
                     .form(&[
-                          ("startTime", since.as_str()),
-                          ("filter", "{\"execType\": \"Trade\"}"),
-                          ("reverse", "true"),
+                        ("startTime", since.as_str()),
+                        ("filter", "{\"execType\": \"Trade\"}"),
+                        ("reverse", "true"),
                     ])
                     .build()
                     .unwrap()
@@ -297,7 +296,7 @@ impl BitmexHttp {
                         },
                     }
                 })
-            .collect()
+                .collect();
         }
         panic!("Too many transaction retries");
     }
@@ -380,7 +379,10 @@ impl BitmexHttp {
         let result = self.http_client.execute(result).await.unwrap();
         let status = result.status();
         let text = result.text().await.unwrap();
-        if text.contains("overloaded") || text.contains("Canceled: Order had execInst") || text.contains("ateway") {
+        if text.contains("overloaded")
+            || text.contains("Canceled: Order had execInst")
+            || text.contains("ateway")
+        {
             return false;
         }
         if !status.is_success() {

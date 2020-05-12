@@ -72,20 +72,18 @@ impl OrderManager {
         true
     }
 
-    pub fn best_buy_price_cancel(&self) -> Option<(BuyPrice, usize)> {
+    pub fn buys_can_cancel(&self) -> impl Iterator<Item = (&BuyPrice, &usize)> {
         self.buys
             .iter()
             .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
-            .next()
-            .map(|(k, (id, _, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (k, id))
     }
 
-    pub fn best_sell_price_cancel(&self) -> Option<(SellPrice, usize)> {
+    pub fn sells_can_cancel(&self) -> impl Iterator<Item = (&SellPrice, &usize)> {
         self.sells
             .iter()
             .filter(|(_, (id, _, stat, _))| *stat != CancelStatus::CancelSent && *id != 0)
-            .next()
-            .map(|(k, (id, _, _, _))| (*k, *id))
+            .map(|(k, (id, _, _, _))| (k, id))
     }
 
     pub fn worst_buy_price_cancel(&self) -> Option<(BuyPrice, usize)> {
@@ -210,24 +208,12 @@ impl OrderManager {
         }
     }
 
-    pub fn best_buy_price_late(&self) -> Option<(BuyPrice, usize)> {
-        self.buys
-            .iter()
-            .filter(|(_, (id, _, stat, alone))| {
-                *stat != CancelStatus::CancelSent && *id != 0 && *alone != CancelAlone::Early
-            })
-            .next()
-            .map(|(k, (id, _, _, _))| (*k, *id))
+    pub fn best_buy_price_can_cancel(&self) -> Option<(BuyPrice, usize)> {
+        self.buys_can_cancel().next().map(|(k, id)| (*k, *id))
     }
 
-    pub fn best_sell_price_late(&self) -> Option<(SellPrice, usize)> {
-        self.sells
-            .iter()
-            .filter(|(_, (id, _, stat, alone))| {
-                *stat != CancelStatus::CancelSent && *id != 0 && *alone != CancelAlone::Early
-            })
-            .next()
-            .map(|(k, (id, _, _, _))| (*k, *id))
+    pub fn best_sell_price_can_cancel(&self) -> Option<(SellPrice, usize)> {
+        self.sells_can_cancel().next().map(|(k, id)| (*k, *id))
     }
 
     pub fn remove_liquidity_from<P: SidedPrice>(
