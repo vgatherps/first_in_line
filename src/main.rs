@@ -83,6 +83,7 @@ enum TacticEventType {
     WriteHtml,
     Ping,
     Reset,
+    None
 }
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
@@ -265,10 +266,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     panic!("Death variable set");
                 }
                 let event_type = select! {
-                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
                     block = bitmex.next().fuse() => {
                         TacticEventType::LocalBook(local_book.handle_book_update(&block.events))
                     },
+                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
                     event = event_reader.recv().fuse() => match event {
                             Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
                             Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
@@ -324,7 +325,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     TacticEventType::Ping => {
                         let _ = join!(bitmex.ping(), remote_agg.ping());
                     }
-                    TacticEventType::WriteHtml => (),
+                    TacticEventType::WriteHtml | TacticEventType::None => (),
                 }
                 if let (
                     Some((_, (local_fair, local_size))),
@@ -399,6 +400,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         | TacticEventType::CheckGone(_, _, _)
                         | TacticEventType::Reset
                         | TacticEventType::Ping
+                        | TacticEventType::None
                         | TacticEventType::Trades(_) => (),
                     };
                 }

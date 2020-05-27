@@ -1,7 +1,7 @@
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
@@ -10,7 +10,7 @@ pub fn convert_price_cents(price: f64) -> usize {
     (price * 100.0).round() as usize
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Exchange {
     OkexSpot,
@@ -29,7 +29,7 @@ pub enum Exchange {
     HuobiQuarterly,
 }
 
-#[derive(Deserialize, Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Side {
     Buy,
     Sell,
@@ -44,6 +44,7 @@ impl Side {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct OrderUpdate {
     pub cents: usize,
     pub size: f64,
@@ -52,6 +53,7 @@ pub struct OrderUpdate {
     pub exchange_time: usize,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -59,12 +61,14 @@ pub struct BookUpdate {
     pub exchange_time: usize,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum MarketEvent {
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
     Clear,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MarketEventBlock {
     pub exchange: Exchange,
     pub events: SmallVec<MarketEvent>,
