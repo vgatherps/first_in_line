@@ -44,7 +44,7 @@ impl Side {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct OrderUpdate {
     pub cents: usize,
     pub size: f64,
@@ -53,7 +53,7 @@ pub struct OrderUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -61,14 +61,14 @@ pub struct BookUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MarketEvent {
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
     Clear,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MarketEventBlock {
     pub exchange: Exchange,
     pub events: SmallVec<MarketEvent>,

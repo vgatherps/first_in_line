@@ -10,6 +10,10 @@ edition = "2018"
 name = "logger"
 path = "src/logger.rs"
 
+[[bin]]
+name = "reader"
+path = "src/reader.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
