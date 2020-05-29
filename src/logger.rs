@@ -6,6 +6,7 @@ use exchange::{
 };
 
 mod exchange;
+mod market_logger;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rt = tokio::runtime::Builder::new()
