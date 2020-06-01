@@ -1,5 +1,5 @@
 #![recursion_limit = "512"]
-
+#![allow(warnings)]
 //WARNING
 //WARNING
 //
@@ -83,7 +83,7 @@ enum TacticEventType {
     WriteHtml,
     Ping,
     Reset,
-    None
+    None,
 }
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {

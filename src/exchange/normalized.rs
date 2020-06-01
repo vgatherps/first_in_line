@@ -1,7 +1,7 @@
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;

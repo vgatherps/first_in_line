@@ -294,6 +294,7 @@ impl OrderManager {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,3 +342,4 @@ mod tests {
         assert!(manager.add_sent_order(&SellPrice::new(10), 10.0));
     }
 }
+*/

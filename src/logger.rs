@@ -1,9 +1,8 @@
+#![allow(warnings)]
+use exchange::bitmex_connection;
 use std::fs::File;
-use std::io::Write;
 use std::io::BufWriter;
-use exchange::{
-    bitmex_connection
-};
+use std::io::Write;
 
 mod exchange;
 
