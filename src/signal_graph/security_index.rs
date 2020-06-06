@@ -66,6 +66,9 @@ impl SecurityMap {
             securities: iter_order_securities.iter().cloned().collect(),
             iter_order_securities,
         };
+        if map.securities.len() != map.iter_order_securities.len() {
+            panic!("Duplicate securities have been passed");
+        }
         (map, MADE_MAP.swap(true, Ordering::SeqCst))
     }
 

@@ -2,7 +2,7 @@ use crate::signal_graph::security_index::{Security, SecurityIndex, SecurityMap};
 
 // A specialized vector interface that holds exactly one element per
 // security. Using a security index here will always be valid
-pub struct SecurityVector<T> {
+ub struct SecurityVector<T> {
     elems: Vec<T>,
 }
 
@@ -46,5 +46,11 @@ impl<T> SecurityVector<T> {
         let index = index.get();
         debug_assert!(index < self.elems.len());
         unsafe { self.elems.get_unchecked_mut(index) }
+    }
+
+    pub fn for_each<F: FnMut(&T)>(&self, mut f: F) {
+        for val in &self.elems {
+            f(val);
+        }
     }
 }

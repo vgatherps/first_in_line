@@ -71,14 +71,14 @@ impl GraphRegistrar {
 
     pub fn generate_graph(
         &self,
-        layout: &HashMap<String, SignalCall>,
+        layout: &[(String, SignalCall)],
         security_map: &SecurityMap,
     ) -> Result<Graph, GraphError> {
         let mut signal_to_instance = HashMap::new();
         for (name, call) in layout {
             let call_sig: &str = &call.signal_name;
-            if signal_to_instance.contains_key(call_sig) {
-                return Err(GraphError::DuplicateSignalInstance(call_sig.to_string()));
+            if signal_to_instance.contains_key(name) {
+                return Err(GraphError::DuplicateSignalInstance(name.clone()));
             }
             let definition = if let Some(def) = self.signal_definitions.get(call_sig) {
                 def.clone()
@@ -97,10 +97,11 @@ impl GraphRegistrar {
             );
         }
 
-        let inner_mem = GraphInnerMem::new(signal_to_instance)?;
+        let inner_mem = GraphInnerMem::new(signal_to_instance, layout, security_map)?;
         let objects = Rc::new(GraphObjectStore::new(inner_mem.clone())?);
         let requested_book_signals: HashSet<_> = layout
-            .values()
+            .iter()
+            .map(|(_, b)| b)
             .flat_map(|sc| sc.inputs.values())
             .filter_map(|nst| match nst {
                 NamedSignalType::Book(sec) => Some(sec),

@@ -3,20 +3,20 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum GraphError {
-    // TODO Test
     #[error("Multiple signals given to registrar with name {0}")]
     DuplicateSignalName(&'static str),
-    //TODO Test
     #[error("Multiple signal instances given to registrar creation with name {0}")]
     DuplicateSignalInstance(String),
-    //TODO test
     #[error("Signal definition {definition} requested by {signal} not found")]
     DefinitionNotFound { definition: String, signal: String },
-    // TODO Test
+    // TODO test
     #[error("Input {input} not found on signal {signal}")]
     InputNotFound { input: &'static str, signal: String },
     #[error("Book input {security:?} not found")]
     BookNotFound { security: Security },
+    // TODO test
+    #[error("Missing subscription in by signal {signal} on names {inputs:?}")]
+    MissingSubscription { signal: String, inputs: Vec<String> },
     #[error("Multiple subscription in by signal {signal} on names {name1} and {name2} in block for {security:?}")]
     MultipleSubscription {
         signal: String,
@@ -24,7 +24,6 @@ pub enum GraphError {
         name2: String,
         security: Security,
     },
-    //TODO Test
     #[error("Parent {parent} requested by signal {child} input {input} not found")]
     ParentNotFound {
         child: String,
@@ -38,9 +37,18 @@ pub enum GraphError {
         input: &'static str,
     },
     // TODO test
-    #[error("Too many signals in graph {0}")]
+    #[error("Too many signals in graph {0}, maximum is 2^16-1")]
     TooManySignals(usize),
+    // TODO test
+    #[error("Too many signals in graph {0}, maximum references is 2^16-1. This can be increased")]
+    TooManyAggregateReferences(usize),
     //TODO test
-    #[error("Cycle discovered in graph call {call} containing {signals:?}")]
-    GraphCycle { call: String, signals: Vec<String> },
+    #[error(
+        "Cycle discovered in graph call {call} containing {signals:?} in block for {security:?}"
+    )]
+    GraphCycle {
+        call: String,
+        signals: Vec<String>,
+        security: Security,
+    },
 }

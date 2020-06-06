@@ -12,13 +12,13 @@ use super::graph_registrar::*;
 use super::security_data::SecurityVector;
 use super::security_index::{Security, SecurityMap};
 
-fn find_seen_signals(
+pub(crate) fn find_seen_signals(
     security: &Security,
-    mem: Rc<GraphInnerMem>,
+    signal_name_to_instance: &HashMap<String, SignalInstantiation>,
 ) -> Result<(HashMap<String, String>, HashMap<String, String>), GraphError> {
     let mut seen_signals: HashMap<String, String> = HashMap::new();
     // First, find the direct dependencies of the security
-    for (signal_name, instance) in &mem.signal_name_to_instance {
+    for (signal_name, instance) in signal_name_to_instance {
         let signal_name = signal_name;
         for (input_name, signal_type) in &instance.inputs {
             match signal_type {
@@ -46,7 +46,7 @@ fn find_seen_signals(
     loop {
         let starting_size = seen_signals.len();
 
-        for (signal_name, instance) in &mem.signal_name_to_instance {
+        for (signal_name, instance) in signal_name_to_instance {
             let signal_name: &str = signal_name;
             for (input_name, signal_type) in &instance.inputs {
                 let parents = match signal_type {
@@ -87,10 +87,10 @@ fn find_seen_signals(
     }
 }
 
-fn topological_sort(
+pub(crate) fn topological_sort(
     seen_signals: &HashMap<String, String>,
     starting_signals: Vec<(String, String)>,
-    mem: Rc<GraphInnerMem>,
+    signal_name_to_instance: &HashMap<String, SignalInstantiation>,
 ) -> Vec<(String, String)> {
     let mut ordered_signals = starting_signals;
 
@@ -100,8 +100,7 @@ fn topological_sort(
     let mut dependencies = HashMap::new();
     // gather the dependencies for every signal in the seen_signals set
     for (signal, name) in seen_signals {
-        let parents = mem
-            .signal_name_to_instance
+        let parents = signal_name_to_instance
             .get(signal)
             .expect("Missing signal late in process")
             .inputs
@@ -199,11 +198,11 @@ pub(crate) fn generate_calls_for(
     agg: &GraphAggregateData,
     objects: Rc<GraphObjectStore>,
 ) -> Result<GraphCallList, GraphError> {
-    let (seen_signals, book_signals) = find_seen_signals(security, mem.clone())?;
+    let (seen_signals, book_signals) = find_seen_signals(security, &mem.signal_name_to_instance)?;
     let sorted = topological_sort(
         &seen_signals,
         book_signals.into_iter().collect(),
-        mem.clone(),
+        &mem.signal_name_to_instance,
     );
 
     // now generate list of actual calls

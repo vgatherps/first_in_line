@@ -1,14 +1,15 @@
 use std::any::Any;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 
 use super::graph_error::GraphError;
 use super::graph_registrar::*;
+use super::graph_sort::{find_seen_signals, topological_sort};
 use super::interface_types::*;
 use super::security_data::SecurityVector;
-use super::security_index::SecurityIndex;
+use super::security_index::{SecurityIndex, SecurityMap};
 
 use dynstack::DynStack;
 
@@ -27,17 +28,20 @@ pub struct GraphAggregateData {
 }
 
 pub(crate) struct GraphObjectStore {
+    // TODO TODO TODO write our own which separates out the vtables from the objects
+    // BIG todo for nontrivial use cases
     pub(crate) objects: DynStack<RawObj>,
     pub(crate) raw_pointers: Vec<*mut u8>,
 }
 
+// This could actually pack 24 bits as the aggregate offset, BUT
+// that doesn't seem needed
 #[derive(Copy, Clone)]
 pub enum ConsumerOrAggregate {
     Aggregate(u32, u16),
     Consumer(i32),
 }
 
-// TODO allocate objects in order of calls, not in order of objects passed in
 pub(crate) struct GraphCallList {
     pub(crate) book_calls: Vec<(BookCallback, *mut u8, *const Cell<f64>)>,
     pub(crate) inner_calls: Vec<(
@@ -69,13 +73,64 @@ impl NamedSignalType {
 impl GraphInnerMem {
     pub(crate) fn new(
         signal_name_to_instance: HashMap<String, SignalInstantiation>,
+        layout: &[(String, SignalCall)],
+        security_map: &SecurityMap,
     ) -> Result<Rc<GraphInnerMem>, GraphError> {
         assert!(signal_name_to_instance.len() < std::u16::MAX as usize);
-        let signal_name_to_index: HashMap<_, _> = signal_name_to_instance
+
+        // TODO code duplication here and registrar
+        let requested_book_signals: HashSet<_> = signal_name_to_instance
             .iter()
-            .enumerate()
-            .map(|(ind, (k, _))| (k.clone(), ind as u16))
+            .map(|(_, b)| b)
+            .flat_map(|sc| sc.inputs.values())
+            .filter_map(|nst| match nst {
+                NamedSignalType::Book(sec) => Some(sec),
+                _ => None,
+            })
             .collect();
+
+        for security in &requested_book_signals {
+            let security = *security;
+            if security_map.to_index(security).is_none() {
+                return Err(GraphError::BookNotFound {
+                    security: security.clone(),
+                });
+            }
+        }
+
+        let security_call_list_justnames = SecurityVector::new_with_err(security_map, |sec, _| {
+            if requested_book_signals.contains(sec) {
+                let (seen_signals, book_signals) =
+                    find_seen_signals(sec, &signal_name_to_instance)?;
+                let sorted_order = topological_sort(
+                    &seen_signals,
+                    book_signals.into_iter().collect(),
+                    &signal_name_to_instance,
+                );
+                Ok(Some(sorted_order))
+            } else {
+                Ok(None)
+            }
+        })?;
+
+        let mut signal_name_to_index = HashMap::new();
+        let mut index_so_far: u16 = 0;
+
+        security_call_list_justnames.for_each(|sigs| {
+            if let Some(sigs) = sigs {
+                for (sig, input) in sigs {
+                    if !signal_name_to_index.contains_key(sig) {
+                        signal_name_to_index.insert(sig.clone(), index_so_far);
+                        index_so_far += 1;
+                    }
+                }
+            }
+        });
+        //
+        // TODO what to do about unseen signals? Does it even matter?
+        // // TODO handle unused signals
+        assert!(signal_name_to_index.len() == signal_name_to_instance.len());
+
 
         let output_values: Vec<_> = signal_name_to_index
             .iter()
@@ -250,9 +305,6 @@ impl GraphObjectStore {
 
             // TODO verify that every expected input name has a generated hook
 
-            // OBVIOUSLY! The bug happens right here, I get the address while the vector is still
-            // getting constructed, so of course it gets corrput later on
-
             let index =
                 (signal_inst.definition.creator)(consumer_hooks, aggregate_hooks, &mut objects);
             assert!(index == *signal_index);
@@ -278,15 +330,8 @@ impl GraphCallList {
         // It turns out, holding indices/keeping operations inside this function
         // drastically increases register pressure and stack usage, potentially to the point
         // of becoming comparably expensive to simple operators
-        //
-        // Keeping parameters directly in the iteration lists increases memory usage, BUT
-        // is very prefetcher friendly and isn't too much compared to books. On the other hand,
-        // the stack manipulation would have created a lot of dependency chains and
-        // read-after-write conflicts
         let book_param = (update.book as *const _, update.updated_mask);
         for (call, ptr, value) in self.book_calls.iter() {
-            // This is already a safety/correctness requirement, so I debug_check and assert
-            // do it unchecked
             call(*ptr, book_param, time, *value);
         }
 
