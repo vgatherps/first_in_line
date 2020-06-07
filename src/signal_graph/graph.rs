@@ -15,6 +15,8 @@ use dynstack::DynStack;
 
 pub struct GraphInnerMem {
     pub output_values: Vec<Cell<f64>>,
+    pub mark_as_written: Vec<Cell<u64>>,
+    pub mark_as_valid: Vec<Cell<u64>>,
     pub(crate) aggregate_mapping_array: Vec<u16>,
     pub(crate) signal_name_to_index: HashMap<String, u16>,
     pub(crate) signal_name_to_aggregate: HashMap<(String, String), Range<u16>>,
@@ -34,6 +36,17 @@ pub(crate) struct GraphObjectStore {
     pub(crate) raw_pointers: Vec<*mut u8>,
 }
 
+// returns bitmap_offset
+#[inline(always)]
+pub(crate) fn index_to_bitmap(index: u16) -> (u16, u16) {
+    let offset = index / 64;
+    let bit = index % 64;
+    (offset, bit)
+}
+
+pub(crate) const SET_BIT: usize = 1;
+pub(crate) const VALID_BIT: usize = 1; 
+
 // This could actually pack 24 bits as the aggregate offset, BUT
 // that doesn't seem needed
 #[derive(Copy, Clone)]
@@ -51,7 +64,8 @@ pub(crate) struct GraphCallList {
         *const Cell<f64>,
     )>,
     pub(crate) hold_objects: Rc<GraphObjectStore>,
-    pub(crate) hold_mem: Rc<GraphInnerMem>,
+    pub(crate) mem: Rc<GraphInnerMem>,
+    pub(crate) mark_as_clean: Vec<u16>,
 }
 
 pub struct Graph {
@@ -126,15 +140,30 @@ impl GraphInnerMem {
                 }
             }
         });
-        //
+
+        for signal in signal_name_to_instance.keys() {
+            if !signal_name_to_index.contains_key(signal) {
+                signal_name_to_index.insert(signal.clone(), index_so_far);
+                index_so_far += 1;
+            }
+        }
+
         // TODO what to do about unseen signals? Does it even matter?
         // // TODO handle unused signals
-        assert!(signal_name_to_index.len() == signal_name_to_instance.len());
 
+        assert_eq!(signal_name_to_index.len(), signal_name_to_instance.len());
 
         let output_values: Vec<_> = signal_name_to_index
             .iter()
             .map(|_| Cell::new(0.0))
+            .collect();
+
+        let bitmap_estimate = 1 + output_values.len() / 64;
+
+        let mark_as_written: Vec<_> = output_values
+            .iter()
+            .map(|_| Cell::new(0))
+            .take(bitmap_estimate)
             .collect();
 
         let mut aggregate_mapping_array = Vec::new();
@@ -206,6 +235,8 @@ impl GraphInnerMem {
 
         let mut rval = Rc::new(GraphInnerMem {
             output_values,
+            mark_as_valid: mark_as_written.clone(),
+            mark_as_written,
             aggregate_mapping_array,
             signal_name_to_index,
             signal_name_to_aggregate,
@@ -337,6 +368,15 @@ impl GraphCallList {
 
         for (call, cons_agg, ptr, value) in self.inner_calls.iter() {
             call(*ptr, *cons_agg, time, *value, aggregate);
+        }
+
+        let mark_slice = &self.mem.mark_as_written[..];
+        for to_mark in &self.mark_as_clean {
+            let to_mark = *to_mark as usize;
+            debug_assert!(mark_slice.len() > to_mark);
+            unsafe {
+                mark_slice.get_unchecked(to_mark)
+            }.set(0);
         }
     }
 }

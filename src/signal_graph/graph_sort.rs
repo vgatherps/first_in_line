@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::graph::{
-    ConsumerOrAggregate, Graph, GraphAggregateData, GraphCallList, GraphInnerMem, GraphObjectStore,
+    ConsumerOrAggregate, Graph, GraphAggregateData, GraphCallList, GraphInnerMem, GraphObjectStore, index_to_bitmap,
 };
 use super::graph_error::GraphError;
 use super::graph_registrar::*;
@@ -205,6 +205,24 @@ pub(crate) fn generate_calls_for(
         &mem.signal_name_to_instance,
     );
 
+    // Now generate the list of distinct mark indices to mark
+    // Since we generate indices in terms of call order, this hopefully should be fairly compact
+    // per graph
+
+    let mark_as_clean: HashSet<_> = sorted
+        .iter()
+        .map(|(sig, _)| {
+            let index = *mem.signal_name_to_index
+                .get(sig)
+                .expect("Late signal found");
+            let (offset, _) = index_to_bitmap(index);
+            offset
+        })
+        .collect();
+
+    let mut mark_as_clean: Vec<_> = mark_as_clean.into_iter().collect();
+    mark_as_clean.sort();
+
     // now generate list of actual calls
 
     let mut inner_call_list = Vec::new();
@@ -272,6 +290,7 @@ pub(crate) fn generate_calls_for(
         book_calls: book_call_list,
         inner_calls: inner_call_list,
         hold_objects: objects,
-        hold_mem: mem,
+        mem,
+        mark_as_clean,
     })
 }

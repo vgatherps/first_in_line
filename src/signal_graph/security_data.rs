@@ -2,7 +2,7 @@ use crate::signal_graph::security_index::{Security, SecurityIndex, SecurityMap};
 
 // A specialized vector interface that holds exactly one element per
 // security. Using a security index here will always be valid
-ub struct SecurityVector<T> {
+pub struct SecurityVector<T> {
     elems: Vec<T>,
 }
 
