@@ -20,7 +20,8 @@ pub struct GraphRegistrar {
 pub struct SignalDefinition {
     pub(crate) inputs: HashMap<&'static str, Signal>,
     pub(crate) creator: fn(
-        consumers: HashMap<&'static str, ConsumerSignal>,
+        outputs: HashMap<&'static str, ConsumerOutput>,
+        input: HashMap<&'static str, ConsumerSignal>,
         aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
         objects: &mut dynstack::DynStack<dyn RawObj>,
     ) -> u16,
@@ -144,8 +145,8 @@ impl GraphRegistrar {
 }
 
 pub trait RegisterSignal {
-    // DO NOT CHANGE THIS REQUIREMENT - 'static is important here for safety
-    type Child: 'static + Sized;
+    type ParamType;
+    type Child;
 
     fn get_signals() -> HashMap<&'static str, Signal>;
     fn create(
@@ -161,222 +162,28 @@ pub trait RegisterSignal {
     }
 
     fn _real_create(
+        outputs: HashMap<&'static str, ConsumerOutput>,
         consumers: HashMap<&'static str, ConsumerSignal>,
         aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
-        objects: &mut dynstack::DynStack<dyn RawObj>,
+        objects: &mut dynstack::DynStack<dyn Any>,
     ) -> u16 {
         let val = Self::create(consumers, aggregators);
         let index = objects.len();
-        dynstack::dyn_push!(objects, UnsafeCell::new(val));
+        dynstack::dyn_push!(objects, val);
         let val = &objects[index];
         assert!(index < std::u16::MAX as usize);
         index as u16
     }
 }
 
-pub trait RawObj {
-    fn get_addr(&self) -> *mut u8;
-    fn check_addr(&self, ptr: *mut u8) {
-        assert_eq!(ptr, self.get_addr());
-    }
+// TODO allow storing book references, eliminate the distinction here
+
+pub trait BookCall {
+    fn call(&mut self, book: &BookUpdate);
 }
 
-impl<T: 'static + Sized> RawObj for UnsafeCell<T> {
-    fn get_addr(&self) -> *mut u8 {
-        self.get() as *mut u8
-    }
-}
-
-pub unsafe trait _CallSignal_ {
-    type Item: 'static + Any + Sized + RegisterSignal;
-    const TYPE_NAME: &'static str;
-    fn check_type(any: &dyn Any) {
-        if !any.is::<Self::Item>() {
-            panic!(
-                "Wrong book call type detected: got type {:?}, expected {}",
-                any.type_id(),
-                Self::TYPE_NAME
-            );
-        }
-    }
-
-    // These allow us to tag dereferenced pointers with extremely short lifetimes
-    // local to the function scope, so nobody can put the references somewhere else
-
-    #[inline]
-    fn shrink_lifetime<'a, T>(ptr: *const T, _: &'a usize) -> &'a T {
-        unsafe { &*ptr }
-    }
-
-    #[inline]
-    fn shrink_lifetime_mut<'a, T>(ptr: *mut T, _: &'a usize) -> &'a mut T {
-        unsafe { &mut *ptr }
-    }
-}
-
-#[macro_export]
-macro_rules! make_consumer_callback {
-    ($fn_name: ident, $consumer_type: ty) => {{
-        use std::cell::Cell;
-        struct InnerCallback {}
-        unsafe impl _CallSignal_ for InnerCallback {
-            type Item = $consumer_type;
-            const TYPE_NAME: &'static str = stringify!($consumer_type);
-        }
-        use arby::signal_graph::graph::ConsumerOrAggregate;
-        impl InnerCallback {
-            fn redirect_call(
-                ptr: *mut u8,
-                index: ConsumerOrAggregate,
-                time: u64,
-                value: *const Cell<f64>,
-                _: *const arby::signal_graph::graph::GraphAggregateData,
-            ) {
-                let ptr = ptr as *mut <Self as _CallSignal_>::Item;
-                let value_offset = match index {
-                    ConsumerOrAggregate::Consumer(value_offset) => value_offset,
-                    ConsumerOrAggregate::Aggregate(_, _) => unsafe {
-                        if cfg!(debug_assertsions) {
-                            unreachable!()
-                        } else {
-                            std::hint::unreachable_unchecked();
-                        }
-                    },
-                };
-                let offset = value_offset as usize;
-                let real_ref = Self::shrink_lifetime_mut(ptr, &offset);
-                let parent_value =
-                    Self::shrink_lifetime(unsafe { value.offset(value_offset as isize) }, &offset);
-                let value = Self::shrink_lifetime(value, &offset);
-                value.set($fn_name(real_ref, parent_value.get(), time))
-            }
-        }
-
-        Signal {
-            sig_type: arby::signal_graph::graph_registrar::InputSignalType::Inner(
-                false,
-                InnerCallback::redirect_call,
-            ),
-            type_check: InnerCallback::check_type,
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! make_aggregate_callback {
-    ($fn_name: ident, $aggregate_type: ty) => {{
-        use std::cell::Cell;
-        struct InnerCallback {}
-        unsafe impl _CallSignal_ for InnerCallback {
-            type Item = $aggregate_type;
-            const TYPE_NAME: &'static str = stringify!($aggregate_type);
-        }
-        use arby::signal_graph::graph::ConsumerOrAggregate;
-        impl InnerCallback {
-            fn redirect_call(
-                ptr: *mut u8,
-                index: ConsumerOrAggregate,
-                time: u64,
-                value: *const Cell<f64>,
-                aggregate: *const arby::signal_graph::graph::GraphAggregateData,
-            ) {
-                let ptr = ptr as *mut <Self as _CallSignal_>::Item;
-                let (mask, offset) = match index {
-                    ConsumerOrAggregate::Aggregate(mask, offset) => (mask, offset),
-                    ConsumerOrAggregate::Consumer(_) => {
-                        if cfg!(debug_assertsions) {
-                            unreachable!()
-                        } else {
-                            unsafe { std::hint::unreachable_unchecked() };
-                        }
-                    }
-                };
-                let offset = offset as usize;
-                let real_ref = Self::shrink_lifetime_mut(ptr, &offset);
-                let value = Self::shrink_lifetime(value, &offset);
-                let graph_agg = Self::shrink_lifetime(aggregate, &offset);
-                debug_assert!(graph_agg.aggregate_signals.len() > offset);
-                let agg_signal = unsafe { graph_agg.aggregate_signals.get_unchecked(offset) };
-                value.set($fn_name(
-                    real_ref,
-                    arby::signal_graph::interface_types::AggregateUpdate::new(mask, agg_signal),
-                    time,
-                ))
-            }
-        }
-
-        Signal {
-            sig_type: arby::signal_graph::graph_registrar::InputSignalType::Inner(
-                true,
-                InnerCallback::redirect_call,
-            ),
-            type_check: InnerCallback::check_type,
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! make_model_callback {
-    ($fn_name: ident, $type: ty) => {{
-        use std::cell::Cell;
-        struct InnerCallback {}
-        unsafe impl _CallSignal_ for InnerCallback {
-            type Item = $type;
-            const TYPE_NAME: &'static str = stringify!($type);
-        }
-        impl InnerCallback {
-            fn redirect_call(ptr: *mut u8, time: u64) {
-                let ptr = ptr as *mut <Self as _CallSignal_>::Item;
-                let dummy = 0;
-                let value = Self::shrink_lifetime(value, &dummy);
-                let real_ref = Self::shrink_lifetime_mut(ptr, &offset);
-                $fn_name(real_ref, time)
-            }
-        }
-        Signal {
-            sig_type: arby::signal_graph::graph_registrar::InputSignalType::Book(
-                InnerCallback::redirect_call,
-            ),
-            type_check: InnerCallback::check_type,
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! make_book_callback {
-    ($fn_name: ident, $type: ty) => {{
-        use std::cell::Cell;
-        struct InnerCallback {}
-        unsafe impl _CallSignal_ for InnerCallback {
-            type Item = $type;
-            const TYPE_NAME: &'static str = stringify!($type);
-        }
-        impl InnerCallback {
-            fn redirect_call(
-                ptr: *mut u8,
-                book_update: (*const BookState, BookUpdateMask),
-                time: u64,
-                value: *const Cell<f64>,
-            ) {
-                let ptr = ptr as *mut <Self as _CallSignal_>::Item;
-                let dummy = 0;
-                let (book_ptr, book_mask) = book_update;
-                let book_update = BookUpdate {
-                    book: Self::shrink_lifetime(book_ptr, &dummy),
-                    updated_mask: book_mask,
-                };
-                let value = Self::shrink_lifetime(value, &dummy);
-                let real_ref = Self::shrink_lifetime_mut(ptr, &dummy);
-                value.set($fn_name(real_ref, book_update, time))
-            }
-        }
-        Signal {
-            sig_type: arby::signal_graph::graph_registrar::InputSignalType::Book(
-                InnerCallback::redirect_call,
-            ),
-            type_check: InnerCallback::check_type,
-        }
-    }};
+pub trait ConsumerCall {
+    fn call(&mut self);
 }
 
 #[derive(Clone)]

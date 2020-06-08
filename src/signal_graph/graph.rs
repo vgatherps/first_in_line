@@ -13,10 +13,13 @@ use super::security_index::{SecurityIndex, SecurityMap};
 
 use dynstack::DynStack;
 
+// TODO reduce god-object ness of this here
+// Make InnerMem only refer to memory used by the signals,
+// and not by arbitrary metadata
 pub struct GraphInnerMem {
-    pub output_values: Vec<Cell<f64>>,
-    pub mark_as_written: Vec<Cell<u64>>,
-    pub mark_as_valid: Vec<Cell<u64>>,
+    pub(crate) output_values: Vec<Cell<f64>>,
+    pub(crate) mark_as_written: Vec<Cell<u64>>,
+    pub(crate) mark_as_valid: Vec<Cell<u64>>,
     pub(crate) aggregate_mapping_array: Vec<u16>,
     pub(crate) signal_name_to_index: HashMap<String, u16>,
     pub(crate) signal_name_to_aggregate: HashMap<(String, String), Range<u16>>,
@@ -30,9 +33,7 @@ pub struct GraphAggregateData {
 }
 
 pub(crate) struct GraphObjectStore {
-    // TODO TODO TODO write our own which separates out the vtables from the objects
-    // BIG todo for nontrivial use cases
-    pub(crate) objects: DynStack<RawObj>,
+    pub(crate) objects: DynStack<dyn Any>,
     pub(crate) raw_pointers: Vec<*mut u8>,
 }
 
@@ -45,7 +46,7 @@ pub(crate) fn index_to_bitmap(index: u16) -> (u16, u16) {
 }
 
 pub(crate) const SET_BIT: usize = 1;
-pub(crate) const VALID_BIT: usize = 1; 
+pub(crate) const VALID_BIT: usize = 1;
 
 // This could actually pack 24 bits as the aggregate offset, BUT
 // that doesn't seem needed
@@ -358,6 +359,7 @@ impl GraphObjectStore {
 impl GraphCallList {
     // TODO check types
     fn trigger(&self, update: BookUpdate, aggregate: &GraphAggregateData, time: u64) {
+        self.mem.active_call_masks.set(&self.aggregate_masks[..]);
         // It turns out, holding indices/keeping operations inside this function
         // drastically increases register pressure and stack usage, potentially to the point
         // of becoming comparably expensive to simple operators
@@ -374,9 +376,7 @@ impl GraphCallList {
         for to_mark in &self.mark_as_clean {
             let to_mark = *to_mark as usize;
             debug_assert!(mark_slice.len() > to_mark);
-            unsafe {
-                mark_slice.get_unchecked(to_mark)
-            }.set(0);
+            unsafe { mark_slice.get_unchecked(to_mark) }.set(0);
         }
     }
 }

@@ -17,13 +17,6 @@ pub enum GraphError {
     // TODO test
     #[error("Missing subscription in by signal {signal} on names {inputs:?}")]
     MissingSubscription { signal: String, inputs: Vec<String> },
-    #[error("Multiple subscription in by signal {signal} on names {name1} and {name2} in block for {security:?}")]
-    MultipleSubscription {
-        signal: String,
-        name1: String,
-        name2: String,
-        security: Security,
-    },
     #[error("Parent {parent} requested by signal {child} input {input} not found")]
     ParentNotFound {
         child: String,
