@@ -1,5 +1,3 @@
-#[macro_use]
-pub mod invariant;
 pub mod graph;
 pub mod graph_error;
 pub mod graph_registrar;

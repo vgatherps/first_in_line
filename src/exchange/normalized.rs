@@ -1,6 +1,8 @@
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 
+use std::hash::{Hash, Hasher};
+
 use serde::{Deserialize, Serialize};
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
@@ -29,7 +31,7 @@ pub enum Exchange {
     HuobiQuarterly,
 }
 
-#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone, Hash)]
 pub enum Side {
     Buy,
     Sell,
@@ -61,7 +63,28 @@ pub struct BookUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl Hash for BookUpdate {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.cents.hash(hasher);
+        self.side.hash(hasher);
+        self.exchange_time.hash(hasher);
+        let int_size = (self.size * 100.0).round() as u64;
+        int_size.hash(hasher);
+    }
+}
+
+impl Hash for OrderUpdate {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.cents.hash(hasher);
+        self.side.hash(hasher);
+        self.exchange_time.hash(hasher);
+        self.order_id.hash(hasher);
+        let int_size = (self.size * 100.0).round() as u64;
+        int_size.hash(hasher);
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Hash)]
 pub enum MarketEvent {
     Book(BookUpdate),
     OrderUpdate(OrderUpdate),
@@ -70,6 +93,7 @@ pub enum MarketEvent {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MarketEventBlock {
+    pub received_time: u128,
     pub exchange: Exchange,
     pub events: SmallVec<MarketEvent>,
 }
@@ -150,6 +174,10 @@ impl MarketDataStream {
                     }
                     Message::Pong(_) => continue,
                     received => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_micros();
                         let events = match op(received) {
                             DataOrResponse::Response(msg) => {
                                 self.stream.send(msg).await.unwrap();
@@ -160,6 +188,7 @@ impl MarketDataStream {
                         if events.len() > 0 {
                             return MarketEventBlock {
                                 events,
+                                received_time: now,
                                 exchange: self.exchange,
                             };
                         }
