@@ -1,5 +1,5 @@
 #![allow(warnings)]
-use exchange::bitmex_connection;
+use exchange::ftx_connection;
 use std::fs::File;
 use std::io::BufWriter;
 use std::io::Write;
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = BufWriter::new(File::create("bitmex_data.out").expect("Couldn't open file"));
-    let mut bitmex_data = bitmex_connection().await;
+    let mut bitmex_data = ftx_connection().await;
     bitmex_data.next().await;
 
     let mut rounds = 0;

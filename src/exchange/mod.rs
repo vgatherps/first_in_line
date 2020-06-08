@@ -3,6 +3,7 @@ mod bybit;
 mod coinbase;
 mod huobi;
 mod okex;
+mod ftx;
 
 pub mod normalized;
 
@@ -11,3 +12,4 @@ pub use bybit::{bybit_connection, BybitType};
 pub use coinbase::coinbase_connection;
 pub use huobi::{huobi_connection, HuobiType};
 pub use okex::{okex_connection, OkexType};
+pub use ftx::ftx_connection;

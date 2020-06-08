@@ -29,6 +29,7 @@ pub enum Exchange {
     // These don't seem to work for some reason
     HuobiSwap,
     HuobiQuarterly,
+    Ftx,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone, Hash)]
@@ -121,6 +122,9 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         Exchange::OkexSpot => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Spot).await
         }
+        Exchange::Ftx => {
+            crate::exchange::ftx_connection().await
+        },
         Exchange::OkexSwap => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Swap).await
         }

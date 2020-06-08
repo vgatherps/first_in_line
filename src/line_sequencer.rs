@@ -1,5 +1,5 @@
 #![allow(warnings)]
-use exchange::bitmex_connection;
+use exchange::ftx_connection;
 use exchange::normalized::MarketEvent;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
@@ -45,7 +45,7 @@ fn align_sequence(master: &[SequenceVal], new: &[SequenceVal]) -> Option<(usize,
 const SEQUENCE_MESSAGES_MATCH: usize = 10;
 
 async fn read_one_stream(sequence_id: usize, queue: Arc<ArrayQueue<SequenceVal>>) {
-    let mut stream = bitmex_connection().await;
+    let mut stream = ftx_connection().await;
 
     loop {
         let msg = stream.next().await;
