@@ -88,9 +88,7 @@ pub(crate) fn topological_sort(
             .flat_map(|parents| parents.into_iter())
             .filter(|parent| seen_signals.contains(parent.as_str()))
             .collect();
-        if parents.len() > 0 {
-            dependencies.insert(signal, parents);
-        }
+        dependencies.insert(signal, parents);
     }
 
     // sort the signals, starting by clearing out the book signals
@@ -104,17 +102,22 @@ pub(crate) fn topological_sort(
                 new_empty_signals.push((*child).clone());
             }
         }
+        println!("Start cycle");
+        println!("{:?}", dependencies);
+        println!("{:?}", new_empty_signals);
 
         for signal in &new_empty_signals {
             for (child, parents) in dependencies.iter_mut() {
                 parents.remove(signal);
             }
         }
+        println!("{:?}", dependencies);
 
         for signal in new_empty_signals {
             dependencies.remove(&signal);
             ordered_signals.push(signal);
         }
+        println!("{:?}", dependencies);
 
         if ordered_signals.len() == starting_size {
             if dependencies.len() != 0 {
@@ -130,10 +133,7 @@ pub(crate) fn generate_calls_for(
     mem: Rc<GraphInnerMem>,
 ) -> Result<GraphCallList, GraphError> {
     let seen_signals = find_seen_signals(security, &mem.signal_name_to_instance)?;
-    let sorted = topological_sort(
-        &seen_signals,
-        &mem.signal_name_to_instance,
-    );
+    let sorted = topological_sort(&seen_signals, &mem.signal_name_to_instance);
 
     // Now generate the list of distinct mark indices to mark
     // Since we generate indices in terms of call order, this hopefully should be fairly compact
@@ -158,15 +158,16 @@ pub(crate) fn generate_calls_for(
     let mut calls = Vec::new();
 
     for signal in sorted {
-        let index = mem.signal_name_to_index.get(&signal).expect("signal name missing late");
+        let index = mem
+            .signal_name_to_index
+            .get(&signal)
+            .expect("signal name missing late");
         let object = &mem.objects[*index as usize];
         // this carefully, carefully, carefully works since we control
         // when the actual objects are referenced out of the graph list.
         // This pointer is only dereferenced during the calls, and we won't have
         // overlapping references
-        let object_ptr = unsafe {
-            object as *const _ as *mut _
-        };
+        let object_ptr = unsafe { object as *const _ as *mut _ };
         calls.push(object_ptr);
     }
 

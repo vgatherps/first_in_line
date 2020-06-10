@@ -10,6 +10,8 @@ use super::graph_sort::generate_calls_for;
 use super::security_data::SecurityVector;
 use super::security_index::{Security, SecurityMap};
 
+pub type GraphHandle = GraphInnerMem;
+
 pub struct GraphRegistrar {
     signal_definitions: HashMap<&'static str, SignalDefinition>,
 }
@@ -21,8 +23,8 @@ pub struct SignalDefinition {
     pub(crate) creator: fn(
         outputs: HashMap<&'static str, ConsumerOutput>,
         books: HashMap<&'static str, BookViewer>,
-        input: HashMap<&'static str, ConsumerSignal>,
-        aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
+        input: HashMap<&'static str, ConsumerInput>,
+        aggregators: HashMap<&'static str, AggregateSignal>,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> u16,
 }
@@ -137,8 +139,8 @@ pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() ->
     fn _real_create<F: CallSignal + RegisterSignal<Child = F> + 'static>(
         outputs: HashMap<&'static str, ConsumerOutput>,
         books: HashMap<&'static str, BookViewer>,
-        consumers: HashMap<&'static str, ConsumerSignal>,
-        aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
+        consumers: HashMap<&'static str, ConsumerInput>,
+        aggregators: HashMap<&'static str, AggregateSignal>,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> u16 {
         let val = F::create(outputs, books, consumers, aggregators);
@@ -165,7 +167,7 @@ pub trait RegisterSignal {
     fn create(
         outputs: HashMap<&'static str, ConsumerOutput>,
         books: HashMap<&'static str, BookViewer>,
-        consumers: HashMap<&'static str, ConsumerSignal>,
-        aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
+        consumers: HashMap<&'static str, ConsumerInput>,
+        aggregators: HashMap<&'static str, AggregateSignal>,
     ) -> Self::Child;
 }

@@ -26,12 +26,17 @@ impl BookViewer {
 
 const MAX_AGGREGATE_SIGNALS: usize = 64;
 
-pub struct ConsumerSignal {
+pub struct ConsumerInput {
     pub(crate) which: u16,
 }
 
 pub struct ConsumerOutput {
-    pub(crate) inner: ConsumerSignal,
+    pub(crate) inner: ConsumerInput,
+}
+
+pub struct ConsumerListener {
+    pub(crate) signal: ConsumerInput,
+    pub(crate) graph: Rc<GraphInnerMem>,
 }
 
 pub struct AggregateSignal {
@@ -46,7 +51,7 @@ pub struct AggregateUpdateIter<'a> {
 
 pub(crate) const MAX_SIGNALS_PER_AGGREGATE: usize = 64;
 
-impl ConsumerSignal {
+impl ConsumerInput {
     #[inline]
     fn get_cell<'a>(&self, graph: &'a GraphInnerMem) -> &'a Cell<f64> {
         let offset = self.which as usize;
@@ -62,6 +67,16 @@ impl ConsumerSignal {
             None
         }
     }
+
+    #[inline]
+    pub fn is_valid(&self, graph: &GraphInnerMem) -> bool {
+        get_bit(self.which, &graph.mark_as_valid)
+    }
+
+    #[inline]
+    pub fn was_written(&self, graph: &GraphInnerMem) -> bool {
+        get_bit(self.which, &graph.mark_as_written)
+    }
 }
 
 // TODO combine
@@ -71,10 +86,10 @@ fn get_bit(index: u16, slice: &[Cell<u64>]) -> bool {
     let (offset, bit) = index_to_bitmap(index);
     let offset = offset as usize;
     let get_mask = 1 << bit;
-    debug_assert!(offset > slice.len());
+    debug_assert!(offset < slice.len());
     let mask = unsafe { slice.get_unchecked(offset) };
     let mask = mask.get();
-    (mask & get_mask) == 0
+    (mask & get_mask) != 0
 }
 
 #[inline]
@@ -82,7 +97,7 @@ fn mark_slice(index: u16, slice: &[Cell<u64>]) {
     let (offset, bit) = index_to_bitmap(index);
     let offset = offset as usize;
     let mark_mask = 1 << bit;
-    debug_assert!(offset > slice.len());
+    debug_assert!(offset < slice.len());
     let mask = unsafe { slice.get_unchecked(offset) };
     let old_mask = mask.get();
     mask.set(old_mask | mark_mask);
@@ -93,7 +108,7 @@ fn clear_slice(index: u16, slice: &[Cell<u64>]) {
     let (offset, bit) = index_to_bitmap(index);
     let offset = offset as usize;
     let mark_mask = 1 << bit;
-    debug_assert!(offset > slice.len());
+    debug_assert!(offset < slice.len());
     let mask = unsafe { slice.get_unchecked(offset) };
     let old_mask = mask.get();
     mask.set(old_mask & !mark_mask);
@@ -103,6 +118,16 @@ impl ConsumerOutput {
     #[inline]
     pub fn get(&self, graph: &GraphInnerMem) -> Option<f64> {
         self.inner.get(graph)
+    }
+
+    #[inline]
+    pub fn is_valid(&self, graph: &GraphInnerMem) -> bool {
+        self.inner.is_valid(graph)
+    }
+
+    #[inline]
+    pub fn was_written(&self, graph: &GraphInnerMem) -> bool {
+        self.inner.was_written(graph)
     }
 
     #[inline]
@@ -124,10 +149,14 @@ impl ConsumerOutput {
     }
 }
 
+impl ConsumerOutput {
+
+}
+
 impl AggregateSignal {
     #[inline]
     pub fn iter_changed<'a>(&self, graph: &'a GraphInnerMem) -> AggregateUpdateIter<'a> {
-        // it's faster to create ana ggregate mask as opposed to branching on each offset
+        // it's faster to create an aggregate mask as opposed to branching on each offset
         let mut mask: u64 = 0;
         let written = &graph.mark_as_written[..];
         for index in self.offsets.start..self.offsets.end {

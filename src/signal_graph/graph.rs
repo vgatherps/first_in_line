@@ -88,12 +88,8 @@ impl GraphInnerMem {
 
         let security_call_list_justnames = SecurityVector::new_with_err(security_map, |sec, _| {
             if requested_book_signals.contains(sec) {
-                let seen_signals =
-                    find_seen_signals(sec, &signal_name_to_instance)?;
-                let sorted_order = topological_sort(
-                    &seen_signals,
-                    &signal_name_to_instance,
-                );
+                let seen_signals = find_seen_signals(sec, &signal_name_to_instance)?;
+                let sorted_order = topological_sort(&seen_signals, &signal_name_to_instance);
                 Ok(Some(sorted_order))
             } else {
                 Ok(None)
@@ -201,7 +197,7 @@ impl GraphInnerMem {
                             signal_name,
                             name,
                         )?;
-                        let consumer_signal = ConsumerSignal { which: consumer };
+                        let consumer_signal = ConsumerInput { which: consumer };
                         consumer_hooks.insert(*name, consumer_signal);
                     }
                     NamedSignalType::Aggregate(parents) => {
@@ -233,10 +229,7 @@ impl GraphInnerMem {
                         let aggregate_signal = AggregateSignal {
                             offsets: (range_start as u16)..(range_end as u16),
                         };
-                        aggregate_hooks
-                            .entry(*name)
-                            .or_insert(vec![])
-                            .push(aggregate_signal);
+                        aggregate_hooks.insert(*name, aggregate_signal);
                     }
                 }
             }
@@ -252,7 +245,7 @@ impl GraphInnerMem {
                 output_hooks.insert(
                     *output,
                     ConsumerOutput {
-                        inner: ConsumerSignal { which: *index },
+                        inner: ConsumerInput { which: *index },
                     },
                 );
             }
@@ -264,7 +257,10 @@ impl GraphInnerMem {
                 aggregate_hooks,
                 &mut objects,
             );
-            assert_eq!(signal_name_to_index.insert(signal_name.clone(), index), None);
+            assert_eq!(
+                signal_name_to_index.insert(signal_name.clone(), index),
+                None
+            );
         }
 
         let mut rval = Rc::new(GraphInnerMem {
@@ -312,6 +308,7 @@ impl GraphCallList {
         }
 
         let mark_slice = &self.mem.mark_as_written[..];
+        println!("Marking {:?}", mark_slice);
         for to_mark in &self.mark_as_clean {
             let to_mark = *to_mark as usize;
             debug_assert!(mark_slice.len() > to_mark);
@@ -322,17 +319,18 @@ impl GraphCallList {
 
 impl Graph {
     pub fn trigger_book(&mut self, security: SecurityIndex, time: u128) {
+        println!("written_bits: {:?}", self.mem.mark_as_written);
         if let Some(calls) = self.book_updates.get_mut(security) {
             calls.trigger(time, &self.mem);
         }
     }
 
     // TODO make safe
-    pub fn signal_listener(&self, signal: &str, output: &str) -> Option<ConsumerSignal> {
+    pub fn signal_listener(&self, signal: &str, output: &str) -> Option<ConsumerInput> {
         self.mem
             .signal_output_to_index
             .get(&(signal.to_string(), output.to_string()))
-            .map(|ind| ConsumerSignal { which: *ind })
+            .map(|ind| ConsumerInput { which: *ind })
     }
 }
 
