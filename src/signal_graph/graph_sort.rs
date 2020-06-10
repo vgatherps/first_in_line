@@ -4,10 +4,7 @@ use std::cell::UnsafeCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::graph::{
-    index_to_bitmap, ConsumerOrAggregate, Graph, GraphAggregateData, GraphCallList, GraphInnerMem,
-    GraphObjectStore,
-};
+use super::graph::{index_to_bitmap, Graph, GraphCallList, GraphInnerMem};
 use super::graph_error::GraphError;
 use super::graph_registrar::*;
 use super::security_data::SecurityVector;
@@ -34,7 +31,7 @@ pub(crate) fn find_seen_signals(
     let book_signals = seen_signals.clone();
 
     // now, keep adding new signals to the map until we find nothing new
-    // This is not an efficient algorithm, but it's simple
+    // This is not an efficient algorithm, but it's simple.
     loop {
         let starting_size = seen_signals.len();
 
@@ -42,8 +39,11 @@ pub(crate) fn find_seen_signals(
             let signal_name: &str = signal_name;
             for (input_name, signal_type) in &instance.inputs {
                 let parents = match signal_type {
-                    NamedSignalType::Inner(_, parents) => parents.clone(),
-                    _ => vec![],
+                    NamedSignalType::Consumer(parent) => vec![parent.0.clone()],
+                    NamedSignalType::Aggregate(parents) => {
+                        parents.iter().map(|(s, n)| s.clone()).collect()
+                    }
+                    NamedSignalType::Book(_) => vec![],
                 };
 
                 // If there are any parents in the set of seen signals
@@ -85,22 +85,15 @@ pub(crate) fn topological_sort(
             .expect("Missing signal late in process")
             .inputs
             .values()
-            .filter_map(|parents| match parents {
-                NamedSignalType::Inner(_, parents) => {
-                    let parents: Vec<_> = parents
-                        .iter()
-                        .filter(|p| {
-                            let p: &str = p;
-                            seen_signals.contains(p)
-                        })
-                        .cloned()
-                        .collect();
-                    assert!(parents.len() > 0);
-                    Some(parents)
+            .map(|parents| match parents {
+                NamedSignalType::Consumer(parent) => vec![parent.0.clone()],
+                NamedSignalType::Aggregate(parents) => {
+                    parents.iter().map(|(s, n)| s.clone()).collect()
                 }
-                NamedSignalType::Book(_) => None,
+                NamedSignalType::Book(_) => vec![],
             })
             .flat_map(|parents| parents.iter())
+            .filter(|parent| seen_signals.contains(*parent))
             .collect();
         if parents.len() > 0 {
             dependencies.insert(*signal, parents);
@@ -190,8 +183,6 @@ pub(crate) fn generate_calls_for(
     Ok(GraphCallList {
         book_calls: book_call_list,
         inner_calls: inner_call_list,
-        hold_objects: objects,
-        mem,
         mark_as_clean,
     })
 }

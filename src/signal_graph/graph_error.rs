@@ -12,23 +12,26 @@ pub enum GraphError {
     // TODO test
     #[error("Input {input} not found on signal {signal}")]
     InputNotFound { input: &'static str, signal: String },
+    // TODO test
     #[error("Book input {security:?} not found")]
     BookNotFound { security: Security },
     // TODO test
-    #[error("Missing subscription in by signal {signal} on names {inputs:?}")]
-    MissingSubscription { signal: String, inputs: Vec<String> },
-    #[error("Parent {parent} requested by signal {child} input {input} not found")]
+    #[error("Parent output {parent}:{output} requested by signal {child} input {input} not found")]
     ParentNotFound {
-        child: String,
         parent: String,
+        output: String,
         input: String,
+        child: String,
     },
     // TODO Test
-    #[error("Signal instance {instance} has too many entries in aggregate {input}")]
+    #[error("Signal instance {instance} has too many entries {entries} in aggregate {input}")]
     AggregateTooLarge {
         instance: String,
+        entries: usize,
         input: &'static str,
     },
+    #[error("Aggregate {name} on signal {signal} has no inputs")]
+    AggregateNoInputs { signal: String, name: &'static str },
     // TODO test
     #[error("Too many signals in graph {0}, maximum is 2^16-1")]
     TooManySignals(usize),

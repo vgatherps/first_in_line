@@ -12,47 +12,30 @@ pub struct Bbo {
     pub ask_size: f64,
 }
 
-// Mask for flags on what changed in the book
-#[repr(C)]
-enum BookUpdateStatus {
-    // Set to true if the bbo is newer than the orderbook
-    BboIsNewer = 0,
-    // Set to true if just the bbo changed
-    BboChange,
-}
-
-#[derive(Copy, Clone, Default)]
-pub struct BookUpdateMask {
-    mask: usize,
-}
-
 // Bbo might be out-of-sync with book, hence the separate signals
-pub struct BookState {
-    pub bbo: Bbo,
-    pub book: OrderBook,
+#[derive(Clone)]
+pub struct BookViewer {
+    pub(crate) book: Rc<OrderBook>,
 }
 
-#[derive(Copy, Clone)]
-pub struct BookUpdate<'a> {
-    pub book: &'a BookState,
-    pub updated_mask: BookUpdateMask,
+impl BookViewer {
+    pub fn book(&self) -> &OrderBook {
+        &*self.book
+    }
 }
 
 const MAX_AGGREGATE_SIGNALS: usize = 64;
 
 pub struct ConsumerSignal {
-    pub(crate) graph: Rc<GraphInnerMem>,
     pub(crate) which: u16,
 }
 
 pub struct ConsumerOutput {
-    inner: ConsumerSignal,
+    pub(crate) inner: ConsumerSignal,
 }
 
 pub struct AggregateSignal {
-    pub(crate) graph: Rc<GraphInnerMem>,
     pub(crate) offsets: std::ops::Range<u16>,
-    pub(crate) aggregate_offset: u16,
 }
 
 pub struct AggregateUpdateIter<'a> {
@@ -65,16 +48,16 @@ pub(crate) const MAX_SIGNALS_PER_AGGREGATE: usize = 64;
 
 impl ConsumerSignal {
     #[inline]
-    fn get_cell(&self) -> &Cell<f64> {
+    fn get_cell<'a>(&self, graph: &'a GraphInnerMem) -> &'a Cell<f64> {
         let offset = self.which as usize;
-        debug_assert!(offset < self.graph.output_values.len());
-        unsafe { self.graph.output_values.get_unchecked(offset) }
+        debug_assert!(offset < graph.output_values.len());
+        unsafe { graph.output_values.get_unchecked(offset) }
     }
 
     #[inline]
-    pub fn get(&self) -> Option<f64> {
-        if get_bit(self.which, &self.graph.mark_as_valid) {
-            Some(self.get_cell().get())
+    pub fn get(&self, graph: &GraphInnerMem) -> Option<f64> {
+        if get_bit(self.which, &graph.mark_as_valid) {
+            Some(self.get_cell(graph).get())
         } else {
             None
         }
@@ -118,36 +101,35 @@ fn clear_slice(index: u16, slice: &[Cell<u64>]) {
 
 impl ConsumerOutput {
     #[inline]
-    pub fn get(&self) -> Option<f64> {
-        self.inner.get()
+    pub fn get(&self, graph: &GraphInnerMem) -> Option<f64> {
+        self.inner.get(graph)
     }
 
     #[inline]
-    pub fn set(&mut self, value: f64) {
-        self.inner.get_cell().set(value);
-        self.mark_valid();
+    pub fn set(&mut self, value: f64, graph: &GraphInnerMem) {
+        self.inner.get_cell(graph).set(value);
+        self.mark_valid(graph);
     }
 
     #[inline]
-    pub fn mark_valid(&mut self) {
-        mark_slice(self.inner.which, &self.inner.graph.mark_as_valid);
-        mark_slice(self.inner.which, &self.inner.graph.mark_as_written);
+    pub fn mark_valid(&mut self, graph: &GraphInnerMem) {
+        mark_slice(self.inner.which, &graph.mark_as_valid);
+        mark_slice(self.inner.which, &graph.mark_as_written);
     }
 
     #[inline]
-    pub fn mark_invalid(&mut self) {
-        clear_slice(self.inner.which, &self.inner.graph.mark_as_valid);
-        mark_slice(self.inner.which, &self.inner.graph.mark_as_written);
+    pub fn mark_invalid(&mut self, graph: &GraphInnerMem) {
+        clear_slice(self.inner.which, &graph.mark_as_valid);
+        mark_slice(self.inner.which, &graph.mark_as_written);
     }
 }
 
 impl AggregateSignal {
-    
     #[inline]
-    pub fn iter_changed<'a>(&'a self) -> AggregateUpdateIter<'a> {
+    pub fn iter_changed<'a>(&self, graph: &'a GraphInnerMem) -> AggregateUpdateIter<'a> {
         // it's faster to create ana ggregate mask as opposed to branching on each offset
         let mut mask: u64 = 0;
-        let written = &self.graph.mark_as_written[..];
+        let written = &graph.mark_as_written[..];
         for index in self.offsets.start..self.offsets.end {
             let bit = get_bit(index, written) as u64;
             mask |= (bit << index);
@@ -155,13 +137,13 @@ impl AggregateSignal {
         let usize_range = (self.offsets.start as usize)..(self.offsets.end as usize);
         AggregateUpdateIter {
             updated_mask: mask,
-            output_values: &self.graph.output_values,
-            index_mapping: &self.graph.aggregate_mapping_array[usize_range],
+            output_values: &graph.output_values,
+            index_mapping: &graph.aggregate_mapping_array[usize_range],
         }
     }
 
     #[inline]
-    pub fn iter_all<'a>(&'a self) -> AggregateUpdateIter<'a> {
+    pub fn iter_all<'a>(&self, graph: &'a GraphInnerMem) -> AggregateUpdateIter<'a> {
         let usize_range = (self.offsets.start as usize)..(self.offsets.end as usize);
         let len = self.offsets.end - self.offsets.start;
         debug_assert!(len <= 32);
@@ -171,8 +153,8 @@ impl AggregateSignal {
         let mask_mask = ((1u64 << len) - 1) as u64;
         AggregateUpdateIter {
             updated_mask: mask & mask_mask,
-            output_values: &self.graph.output_values,
-            index_mapping: &self.graph.aggregate_mapping_array[usize_range],
+            output_values: &graph.output_values,
+            index_mapping: &graph.aggregate_mapping_array[usize_range],
         }
     }
 }

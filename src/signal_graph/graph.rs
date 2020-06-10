@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 
+use crate::order_book::OrderBook;
+
 use super::graph_error::GraphError;
 use super::graph_registrar::*;
 use super::graph_sort::{find_seen_signals, topological_sort};
@@ -20,21 +22,11 @@ pub struct GraphInnerMem {
     pub(crate) output_values: Vec<Cell<f64>>,
     pub(crate) mark_as_written: Vec<Cell<u64>>,
     pub(crate) mark_as_valid: Vec<Cell<u64>>,
-    pub(crate) aggregate_mapping_array: Vec<u16>,
-    pub(crate) signal_name_to_index: HashMap<String, u16>,
-    pub(crate) signal_name_to_aggregate: HashMap<(String, String), Range<u16>>,
-    pub(crate) signal_name_to_consumer: HashMap<(String, String), u16>,
+    pub(crate) books: SecurityVector<Rc<OrderBook>>,
+    pub(crate) signal_output_to_index: HashMap<(String, String), u16>,
     pub(crate) signal_name_to_instance: HashMap<String, SignalInstantiation>,
-}
-
-pub struct GraphAggregateData {
-    pub aggregate_signals: Vec<AggregateSignal>,
-    pub(crate) signal_name_to_aggregate_index: HashMap<(String, String), u16>,
-}
-
-pub(crate) struct GraphObjectStore {
-    pub(crate) objects: DynStack<dyn Any>,
-    pub(crate) raw_pointers: Vec<*mut u8>,
+    pub(crate) aggregate_mapping_array: Vec<u16>,
+    pub(crate) objects: DynStack<dyn CallSignal>,
 }
 
 // returns bitmap_offset
@@ -45,34 +37,14 @@ pub(crate) fn index_to_bitmap(index: u16) -> (u16, u16) {
     (offset, bit)
 }
 
-pub(crate) const SET_BIT: usize = 1;
-pub(crate) const VALID_BIT: usize = 1;
-
-// This could actually pack 24 bits as the aggregate offset, BUT
-// that doesn't seem needed
-#[derive(Copy, Clone)]
-pub enum ConsumerOrAggregate {
-    Aggregate(u32, u16),
-    Consumer(i32),
-}
-
 pub(crate) struct GraphCallList {
-    pub(crate) book_calls: Vec<(BookCallback, *mut u8, *const Cell<f64>)>,
-    pub(crate) inner_calls: Vec<(
-        InnerCallback,
-        ConsumerOrAggregate,
-        *mut u8,
-        *const Cell<f64>,
-    )>,
-    pub(crate) hold_objects: Rc<GraphObjectStore>,
+    pub(crate) calls: Vec<*mut CallSignal>,
     pub(crate) mem: Rc<GraphInnerMem>,
     pub(crate) mark_as_clean: Vec<u16>,
 }
 
 pub struct Graph {
     pub(crate) book_updates: SecurityVector<Option<GraphCallList>>,
-    pub(crate) agg_data: GraphAggregateData,
-    pub(crate) objects: Rc<GraphObjectStore>,
     pub(crate) mem: Rc<GraphInnerMem>,
 }
 
@@ -128,33 +100,37 @@ impl GraphInnerMem {
             }
         })?;
 
-        let mut signal_name_to_index = HashMap::new();
+        let mut signal_output_to_index = HashMap::new();
         let mut index_so_far: u16 = 0;
 
         security_call_list_justnames.for_each(|sigs| {
             if let Some(sigs) = sigs {
-                for (sig, input) in sigs {
-                    if !signal_name_to_index.contains_key(sig) {
-                        signal_name_to_index.insert(sig.clone(), index_so_far);
-                        index_so_far += 1;
+                for sig in sigs {
+                    let instance = signal_name_to_instance
+                        .get(sig)
+                        .expect("Missing signal instance");
+                    for output in &instance.definition.outputs {
+                        let key = (sig.clone(), output.to_string());
+                        if !signal_output_to_index.contains_key(&key) {
+                            signal_output_to_index.insert(key, index_so_far);
+                            index_so_far += 1;
+                        }
                     }
                 }
             }
         });
 
-        for signal in signal_name_to_instance.keys() {
-            if !signal_name_to_index.contains_key(signal) {
-                signal_name_to_index.insert(signal.clone(), index_so_far);
-                index_so_far += 1;
+        for (signal, instance) in signal_name_to_instance {
+            for output in &instance.definition.outputs {
+                let key = (signal.clone(), output.to_string());
+                if !signal_output_to_index.contains_key(&key) {
+                    signal_output_to_index.insert(key, index_so_far);
+                    index_so_far += 1;
+                }
             }
         }
 
-        // TODO what to do about unseen signals? Does it even matter?
-        // // TODO handle unused signals
-
-        assert_eq!(signal_name_to_index.len(), signal_name_to_instance.len());
-
-        let output_values: Vec<_> = signal_name_to_index
+        let output_values: Vec<_> = signal_output_to_index
             .iter()
             .map(|_| Cell::new(0.0))
             .collect();
@@ -167,128 +143,28 @@ impl GraphInnerMem {
             .take(bitmap_estimate)
             .collect();
 
-        let mut aggregate_mapping_array = Vec::new();
-        let mut signal_name_to_aggregate = HashMap::<_, _>::new();
-        for ((name, signal), parents) in signal_name_to_instance
-            .iter()
-            .flat_map(|(signal, parents)| {
-                let signal = signal.clone();
-                parents
-                    .inputs
-                    .iter()
-                    .map(move |(name, sig)| ((name, signal.clone()), sig))
-            })
-            .map(|(tag, parents)| {
-                (
-                    tag,
-                    match parents {
-                        NamedSignalType::Inner(true, parents) => parents.clone(),
-                        _ => vec![],
-                    },
-                )
-            })
-        {
-            let range_start = aggregate_mapping_array.len() as u16;
-            for parent in parents {
-                aggregate_mapping_array.push(
-                    if let Some(index) = signal_name_to_index.get(&parent) {
-                        *index
-                    } else {
-                        return Err(GraphError::ParentNotFound {
-                            child: signal.clone(),
-                            parent: parent.clone(),
-                            input: name.clone(),
-                        });
-                    },
-                )
-            }
-            let range_end = aggregate_mapping_array.len() as u16;
-            signal_name_to_aggregate.insert((name.clone(), signal.clone()), range_start..range_end);
-        }
+        let books = SecurityVector::new_with(security_map, |_, _| Rc::new(OrderBook::new()));
 
-        let mut signal_name_to_consumer = HashMap::new();
-        for ((name, signal), parent) in signal_name_to_instance
-            .iter()
-            .flat_map(|(signal, parents)| {
-                // for god's sake borrowchecker this is valid without the extra clones
-                let signal = signal.clone();
-                parents
-                    .inputs
-                    .iter()
-                    .map(move |(name, sig)| ((name, signal.clone()), sig))
-            })
-            .filter_map(|(tag, parents)| match parents {
-                NamedSignalType::Inner(false, parent) => Some((tag, &parent[0])),
-                _ => None,
-            })
-        {
-            let key = (name.clone(), signal.clone());
-            if let Some(index) = signal_name_to_index.get(parent) {
-                signal_name_to_consumer.insert(key, *index)
-            } else {
-                return Err(GraphError::ParentNotFound {
-                    child: signal.clone(),
-                    parent: parent.clone(),
-                    input: name.clone(),
-                });
-            };
-        }
-
-        let mut rval = Rc::new(GraphInnerMem {
-            output_values,
-            mark_as_valid: mark_as_written.clone(),
-            mark_as_written,
-            aggregate_mapping_array,
-            signal_name_to_index,
-            signal_name_to_aggregate,
-            signal_name_to_consumer,
-            signal_name_to_instance,
-        });
-
-        // for each signal, now give it an aggregate signal
-
-        Ok(rval)
-    }
-}
-
-impl GraphAggregateData {
-    pub fn new(mem: Rc<GraphInnerMem>) -> GraphAggregateData {
-        let mut aggregate_signals = Vec::new();
-        let mut signal_name_to_aggregate_index = HashMap::new();
-
-        for (index, (key, range)) in mem.signal_name_to_aggregate.iter().enumerate() {
-            let agg_signal = AggregateSignal {
-                graph: mem.clone(),
-                offsets: range.clone(),
-            };
-
-            assert_eq!(index, aggregate_signals.len());
-            aggregate_signals.push(agg_signal);
-            signal_name_to_aggregate_index.insert(key.clone(), index as u16);
-        }
-
-        GraphAggregateData {
-            aggregate_signals,
-            signal_name_to_aggregate_index,
-        }
-    }
-}
-
-impl GraphObjectStore {
-    pub fn new(graph: Rc<GraphInnerMem>) -> Result<GraphObjectStore, GraphError> {
-        let mut ordered_signals: Vec<_> = graph.signal_name_to_index.iter().collect();
+        let mut ordered_signals: Vec<_> = signal_output_to_index.iter().collect();
 
         ordered_signals.sort_by(|(_, ind), (_, ind2)| ind.cmp(ind2));
+        let mut aggregate_offsets = Vec::new();
+
+        let mut built_signals = HashSet::new();
 
         let mut objects = DynStack::new();
 
-        for (signal_name, signal_index) in ordered_signals {
-            let signal_inst = graph
-                .signal_name_to_instance
+        for ((signal_name, _), _) in ordered_signals {
+            if built_signals.contains(signal_name) {
+                continue;
+            }
+            built_signals.insert(signal_name);
+            let signal_inst = signal_name_to_instance
                 .get(signal_name)
                 // This isn't a returned error since it implies a core inconsistency in the
-                // graph emmory object
+                // graph memory object
                 .expect("Must find signal name deep in building");
+            let mut book_hooks = HashMap::new();
             let mut consumer_hooks = HashMap::new();
             let mut aggregate_hooks = HashMap::new();
 
@@ -301,31 +177,60 @@ impl GraphObjectStore {
                         signal: signal_name.clone(),
                     });
                 };
-                let key = (name.to_string(), signal_name.clone());
                 match parents_of_inst {
-                    NamedSignalType::Book(_) => (),
-                    NamedSignalType::Inner(false, _) => {
-                        // TODO can this happen while passing the previous checks?
-                        // I think so but am not sure
-                        let consumer = *graph
-                            .signal_name_to_consumer
-                            .get(&key)
-                            .expect("name-key pair missing late");
-                        let consumer_signal = ConsumerSignal {
-                            graph: graph.clone(),
-                            which: consumer,
-                        };
+                    NamedSignalType::Book(sec) => {
+                        if let Some(index) = security_map.to_index(sec) {
+                            book_hooks.insert(
+                                name,
+                                BookViewer {
+                                    book: books.get(index).clone(),
+                                },
+                            );
+                        } else {
+                            return Err(GraphError::BookNotFound {
+                                security: sec.clone(),
+                            });
+                        }
+                    }
+                    NamedSignalType::Consumer((parent_signal, parent_output)) => {
+                        let consumer = get_index_for(
+                            &signal_output_to_index,
+                            parent_signal,
+                            parent_output,
+                            signal_name,
+                            name,
+                        )?;
+                        let consumer_signal = ConsumerSignal { which: consumer };
                         consumer_hooks.insert(*name, consumer_signal);
                     }
-                    NamedSignalType::Inner(true, _) => {
-                        let aggregate = graph
-                            .signal_name_to_aggregate
-                            .get(&key)
-                            .expect("name-key pair missing late")
-                            .clone();
+                    NamedSignalType::Aggregate(parents) => {
+                        if parents.len() == 0 {
+                            return Err(GraphError::AggregateNoInputs {
+                                signal: signal_name.clone(),
+                                name: name,
+                            });
+                        }
+                        if parents.len() > MAX_SIGNALS_PER_AGGREGATE {
+                            return Err(GraphError::AggregateTooLarge {
+                                instance: signal_name.clone(),
+                                input: name,
+                                entries: parents.len(),
+                            });
+                        }
+                        let range_start = aggregate_offsets.len();
+                        for (parent, output) in parents {
+                            let consumer = get_index_for(
+                                &signal_output_to_index,
+                                parent,
+                                parent,
+                                signal_name,
+                                name,
+                            )?;
+                            aggregate_offsets.push(consumer);
+                        }
+                        let range_end = aggregate_offsets.len();
                         let aggregate_signal = AggregateSignal {
-                            graph: graph.clone(),
-                            offsets: aggregate,
+                            offsets: (range_start as u16)..(range_end as u16),
                         };
                         aggregate_hooks
                             .entry(*name)
@@ -337,39 +242,70 @@ impl GraphObjectStore {
 
             // TODO verify that every expected input name has a generated hook
 
-            let index =
-                (signal_inst.definition.creator)(consumer_hooks, aggregate_hooks, &mut objects);
-            assert!(index == *signal_index);
+            let output_hooks = HashMap::new();
+            for output in signal_inst.definition.outputs {
+                let key = (signal_name.clone(), output.to_string());
+                let index = signal_output_to_index
+                    .get(&key)
+                    .expect("Missing generated output key");
+                output_hooks.insert(
+                    output,
+                    ConsumerOutput {
+                        inner: ConsumerSignal { which: *index },
+                    },
+                );
+            }
+
+            (signal_inst.definition.creator)(
+                output_hooks,
+                book_hooks,
+                consumer_hooks,
+                aggregate_hooks,
+                &mut objects,
+            );
         }
-        let mut raw_pointers = Vec::new();
-        for object in objects.iter() {
-            raw_pointers.push(object.get_addr());
-        }
-        assert!(objects.len() == raw_pointers.len());
-        for (obj, ptr) in objects.iter().zip(raw_pointers.iter()) {
-            obj.check_addr(*ptr)
-        }
-        Ok(GraphObjectStore {
+
+        let mut rval = Rc::new(GraphInnerMem {
+            output_values,
+            books,
+            mark_as_valid: mark_as_written.clone(),
+            mark_as_written,
+            signal_output_to_index,
+            signal_name_to_instance,
+            aggregate_mapping_array: aggregate_offsets,
             objects,
-            raw_pointers,
+        });
+
+        Ok(rval)
+    }
+}
+
+fn get_index_for(
+    signal_output_to_index: &HashMap<(String, String), u16>,
+    parent: &str,
+    output: &str,
+    signal: &str,
+    name: &str,
+) -> Result<u16, GraphError> {
+    let key = (parent.to_string(), output.to_string());
+    if let Some(parent) = signal_output_to_index.get(&key) {
+        Ok(*parent)
+    } else {
+        Err(GraphError::ParentNotFound {
+            parent: parent.to_string(),
+            output: output.to_string(),
+            input: name.to_string(),
+            child: signal.to_string(),
         })
     }
 }
 
 impl GraphCallList {
     // TODO check types
-    fn trigger(&self, update: BookUpdate, aggregate: &GraphAggregateData, time: u64) {
-        self.mem.active_call_masks.set(&self.aggregate_masks[..]);
-        // It turns out, holding indices/keeping operations inside this function
-        // drastically increases register pressure and stack usage, potentially to the point
-        // of becoming comparably expensive to simple operators
-        let book_param = (update.book as *const _, update.updated_mask);
-        for (call, ptr, value) in self.book_calls.iter() {
-            call(*ptr, book_param, time, *value);
-        }
-
-        for (call, cons_agg, ptr, value) in self.inner_calls.iter() {
-            call(*ptr, *cons_agg, time, *value, aggregate);
+    fn trigger(&mut self, time: u128, graph: &GraphInnerMem) {
+        for call in self.calls.iter() {
+            let call = unsafe { &mut **call };
+            call.call_signal(time, graph);
         }
 
         let mark_slice = &self.mem.mark_as_written[..];
@@ -382,24 +318,22 @@ impl GraphCallList {
 }
 
 impl Graph {
-    pub fn trigger_book(&mut self, update: BookUpdate, security: SecurityIndex, time: u64) {
+    pub fn trigger_book(&mut self, security: SecurityIndex, time: u128) {
         if let Some(calls) = self.book_updates.get(security) {
-            calls.trigger(update, &self.agg_data, time);
+            calls.trigger(time, &self.mem);
         }
     }
 
-    pub fn signal_listener(&self, signal: &str) -> Option<ConsumerSignal> {
+    // TODO make safe
+    pub fn signal_listener(&self, signal: &str, output: &str) -> Option<ConsumerSignal> {
         self.mem
-            .signal_name_to_index
-            .get(signal)
-            .map(|ind| ConsumerSignal {
-                graph: self.mem.clone(),
-                which: *ind,
-            })
+            .signal_output_to_index
+            .get(&(signal.to_string(), output.to_string()))
+            .map(|ind| ConsumerSignal { which: *ind })
     }
 }
 
 #[no_mangle]
-pub fn check_graph_code(graph: &mut Graph, update: BookUpdate, security: SecurityIndex, time: u64) {
-    graph.trigger_book(update, security, time);
+pub fn check_graph_code(graph: &mut Graph, security: SecurityIndex, time: u128) {
+    graph.trigger_book(security, time);
 }

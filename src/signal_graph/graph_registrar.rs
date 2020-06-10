@@ -4,9 +4,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::graph::{
-    ConsumerOrAggregate, Graph, GraphAggregateData, GraphCallList, GraphInnerMem, GraphObjectStore,
-};
+use super::graph::{Graph, GraphCallList, GraphInnerMem};
 use super::graph_error::GraphError;
 use super::graph_sort::generate_calls_for;
 use super::security_data::SecurityVector;
@@ -18,12 +16,14 @@ pub struct GraphRegistrar {
 
 #[derive(Clone)]
 pub struct SignalDefinition {
-    pub(crate) inputs: HashMap<&'static str, Signal>,
+    pub(crate) inputs: HashMap<&'static str, SignalType>,
+    pub(crate) outputs: HashSet<&'static str>,
     pub(crate) creator: fn(
         outputs: HashMap<&'static str, ConsumerOutput>,
+        books: HashMap<&'static str, BookViewer>,
         input: HashMap<&'static str, ConsumerSignal>,
         aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
-        objects: &mut dynstack::DynStack<dyn RawObj>,
+        objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> u16,
 }
 
@@ -33,22 +33,18 @@ pub(crate) struct SignalInstantiation {
     pub(crate) inputs: HashMap<String, NamedSignalType>,
 }
 
-#[derive(Clone)]
-pub struct Signal {
-    pub sig_type: InputSignalType,
-    pub type_check: fn(&dyn Any),
+#[derive(Copy, Clone)]
+pub enum SignalType {
+    Book,
+    Consumer,
+    Aggregate,
 }
 
 #[derive(Clone)]
 pub enum NamedSignalType {
     Book(Security),
-    Inner(bool, Vec<String>),
-}
-
-#[derive(Clone)]
-pub enum InputSignalType {
-    Book(BookCallback),
-    Inner(bool, InnerCallback),
+    Consumer((String, String)),
+    Aggregate(Vec<(String, String)>),
 }
 
 // TODO should be called instantiation, name already taken
@@ -119,17 +115,9 @@ impl GraphRegistrar {
             }
         }
 
-        let aggregate = GraphAggregateData::new(inner_mem.clone());
-
         let security_call_list = SecurityVector::new_with_err(security_map, |sec, _| {
             if requested_book_signals.contains(sec) {
-                Some(generate_calls_for(
-                    sec,
-                    inner_mem.clone(),
-                    &aggregate,
-                    objects.clone(),
-                ))
-                .transpose()
+                Some(generate_calls_for(sec, inner_mem.clone())).transpose()
             } else {
                 Ok(None)
             }
@@ -137,70 +125,48 @@ impl GraphRegistrar {
 
         Ok(Graph {
             book_updates: security_call_list,
-            agg_data: aggregate,
-            objects,
             mem: inner_mem,
         })
     }
 }
 
-pub trait RegisterSignal {
-    type ParamType;
-    type Child;
+pub trait CallSignal {
+    fn call_signal(&mut self, time: u128, graph: &GraphInnerMem);
+}
 
-    fn get_signals() -> HashMap<&'static str, Signal>;
-    fn create(
-        consumers: HashMap<&'static str, ConsumerSignal>,
-        aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
-    ) -> Self::Child;
-
-    fn get_definition() -> SignalDefinition {
-        SignalDefinition {
-            inputs: Self::get_signals(),
-            creator: Self::_real_create,
-        }
-    }
-
-    fn _real_create(
+pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() -> SignalDefinition {
+    fn _real_create<F: CallSignal + RegisterSignal<Child = F> + 'static>(
         outputs: HashMap<&'static str, ConsumerOutput>,
+        books: HashMap<&'static str, BookViewer>,
         consumers: HashMap<&'static str, ConsumerSignal>,
         aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
-        objects: &mut dynstack::DynStack<dyn Any>,
+        objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> u16 {
-        let val = Self::create(consumers, aggregators);
+        let val = F::create(outputs, books, consumers, aggregators);
+        // BOOOOO rust and weird type specification problems
+        // make it impossible to do this another way.
         let index = objects.len();
         dynstack::dyn_push!(objects, val);
-        let val = &objects[index];
+
         assert!(index < std::u16::MAX as usize);
         index as u16
     }
+
+    SignalDefinition {
+        inputs: T::get_inputs(),
+        outputs: T::get_outputs(),
+        creator: _real_create::<T>,
+    }
 }
 
-// TODO allow storing book references, eliminate the distinction here
-
-pub trait BookCall {
-    fn call(&mut self, book: &BookUpdate);
-}
-
-pub trait ConsumerCall {
-    fn call(&mut self);
-}
-
-#[derive(Clone)]
-pub enum BookSignalType {
-    AllBook,
-    Bbo,
-}
-
-pub type BookCallback = fn(*mut u8, (*const BookState, BookUpdateMask), u64, *const Cell<f64>);
-// All of the non-book signals are made into an into a single callback,
-// the consumer ones deconstruct the aggregate signal into a consumer signal
-pub type InnerCallback =
-    fn(*mut u8, ConsumerOrAggregate, u64, *const Cell<f64>, *const GraphAggregateData);
-
-pub enum InputSignalInfo {
-    // TODO add direct book-info references
-    BookSignal,
-    Consumer(ConsumerSignal),
-    Aggregator(Vec<AggregateSignal>),
+pub trait RegisterSignal {
+    type Child;
+    fn get_inputs() -> HashMap<&'static str, SignalType>;
+    fn get_outputs() -> HashSet<&'static str>;
+    fn create(
+        outputs: HashMap<&'static str, ConsumerOutput>,
+        books: HashMap<&'static str, BookViewer>,
+        consumers: HashMap<&'static str, ConsumerSignal>,
+        aggregators: HashMap<&'static str, Vec<AggregateSignal>>,
+    ) -> Self::Child;
 }
