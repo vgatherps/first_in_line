@@ -95,7 +95,6 @@ impl GraphRegistrar {
         }
 
         let inner_mem = GraphInnerMem::new(signal_to_instance, layout, security_map)?;
-        let objects = Rc::new(GraphObjectStore::new(inner_mem.clone())?);
         let requested_book_signals: HashSet<_> = layout
             .iter()
             .map(|(_, b)| b)

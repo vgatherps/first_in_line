@@ -24,6 +24,7 @@ pub struct GraphInnerMem {
     pub(crate) mark_as_valid: Vec<Cell<u64>>,
     pub(crate) books: SecurityVector<Rc<OrderBook>>,
     pub(crate) signal_output_to_index: HashMap<(String, String), u16>,
+    pub(crate) signal_name_to_index: HashMap<String, u16>,
     pub(crate) signal_name_to_instance: HashMap<String, SignalInstantiation>,
     pub(crate) aggregate_mapping_array: Vec<u16>,
     pub(crate) objects: DynStack<dyn CallSignal>,
@@ -87,11 +88,10 @@ impl GraphInnerMem {
 
         let security_call_list_justnames = SecurityVector::new_with_err(security_map, |sec, _| {
             if requested_book_signals.contains(sec) {
-                let (seen_signals, book_signals) =
+                let seen_signals =
                     find_seen_signals(sec, &signal_name_to_instance)?;
                 let sorted_order = topological_sort(
                     &seen_signals,
-                    book_signals.into_iter().collect(),
                     &signal_name_to_instance,
                 );
                 Ok(Some(sorted_order))
@@ -120,7 +120,7 @@ impl GraphInnerMem {
             }
         });
 
-        for (signal, instance) in signal_name_to_instance {
+        for (signal, instance) in &signal_name_to_instance {
             for output in &instance.definition.outputs {
                 let key = (signal.clone(), output.to_string());
                 if !signal_output_to_index.contains_key(&key) {
@@ -153,13 +153,14 @@ impl GraphInnerMem {
         let mut built_signals = HashSet::new();
 
         let mut objects = DynStack::new();
+        let mut signal_name_to_index = HashMap::new();
 
         for ((signal_name, _), _) in ordered_signals {
             if built_signals.contains(signal_name) {
                 continue;
             }
             built_signals.insert(signal_name);
-            let signal_inst = signal_name_to_instance
+            let signal_inst = &signal_name_to_instance
                 .get(signal_name)
                 // This isn't a returned error since it implies a core inconsistency in the
                 // graph memory object
@@ -181,7 +182,7 @@ impl GraphInnerMem {
                     NamedSignalType::Book(sec) => {
                         if let Some(index) = security_map.to_index(sec) {
                             book_hooks.insert(
-                                name,
+                                *name,
                                 BookViewer {
                                     book: books.get(index).clone(),
                                 },
@@ -195,8 +196,8 @@ impl GraphInnerMem {
                     NamedSignalType::Consumer((parent_signal, parent_output)) => {
                         let consumer = get_index_for(
                             &signal_output_to_index,
-                            parent_signal,
-                            parent_output,
+                            &parent_signal,
+                            &parent_output,
                             signal_name,
                             name,
                         )?;
@@ -221,8 +222,8 @@ impl GraphInnerMem {
                         for (parent, output) in parents {
                             let consumer = get_index_for(
                                 &signal_output_to_index,
-                                parent,
-                                parent,
+                                &parent,
+                                &output,
                                 signal_name,
                                 name,
                             )?;
@@ -242,27 +243,28 @@ impl GraphInnerMem {
 
             // TODO verify that every expected input name has a generated hook
 
-            let output_hooks = HashMap::new();
-            for output in signal_inst.definition.outputs {
+            let mut output_hooks = HashMap::new();
+            for output in &signal_inst.definition.outputs {
                 let key = (signal_name.clone(), output.to_string());
                 let index = signal_output_to_index
                     .get(&key)
                     .expect("Missing generated output key");
                 output_hooks.insert(
-                    output,
+                    *output,
                     ConsumerOutput {
                         inner: ConsumerSignal { which: *index },
                     },
                 );
             }
 
-            (signal_inst.definition.creator)(
+            let index = (signal_inst.definition.creator)(
                 output_hooks,
                 book_hooks,
                 consumer_hooks,
                 aggregate_hooks,
                 &mut objects,
             );
+            assert_eq!(signal_name_to_index.insert(signal_name.clone(), index), None);
         }
 
         let mut rval = Rc::new(GraphInnerMem {
@@ -271,6 +273,7 @@ impl GraphInnerMem {
             mark_as_valid: mark_as_written.clone(),
             mark_as_written,
             signal_output_to_index,
+            signal_name_to_index,
             signal_name_to_instance,
             aggregate_mapping_array: aggregate_offsets,
             objects,
@@ -319,7 +322,7 @@ impl GraphCallList {
 
 impl Graph {
     pub fn trigger_book(&mut self, security: SecurityIndex, time: u128) {
-        if let Some(calls) = self.book_updates.get(security) {
+        if let Some(calls) = self.book_updates.get_mut(security) {
             calls.trigger(time, &self.mem);
         }
     }

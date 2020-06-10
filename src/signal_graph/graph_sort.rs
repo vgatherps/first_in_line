@@ -13,7 +13,7 @@ use super::security_index::{Security, SecurityMap};
 pub(crate) fn find_seen_signals(
     security: &Security,
     signal_name_to_instance: &HashMap<String, SignalInstantiation>,
-) -> Result<(HashSet<String>, HashSet<String>), GraphError> {
+) -> Result<HashSet<String>, GraphError> {
     let mut seen_signals: HashSet<String> = HashSet::new();
     // First, find the direct dependencies of the security
     for (signal_name, instance) in signal_name_to_instance {
@@ -27,8 +27,6 @@ pub(crate) fn find_seen_signals(
             }
         }
     }
-
-    let book_signals = seen_signals.clone();
 
     // now, keep adding new signals to the map until we find nothing new
     // This is not an efficient algorithm, but it's simple.
@@ -63,20 +61,15 @@ pub(crate) fn find_seen_signals(
         }
 
         if starting_size == seen_signals.len() {
-            return Ok((seen_signals, book_signals));
+            return Ok(seen_signals);
         }
     }
 }
 
 pub(crate) fn topological_sort(
     seen_signals: &HashSet<String>,
-    starting_signals: Vec<String>,
     signal_name_to_instance: &HashMap<String, SignalInstantiation>,
 ) -> Vec<String> {
-    let mut ordered_signals = starting_signals;
-
-    let mut already_in_order: HashSet<_> = ordered_signals.iter().cloned().collect();
-
     let mut dependencies = HashMap::new();
     // gather the dependencies for every signal in the seen_signals set
     for signal in seen_signals {
@@ -92,36 +85,36 @@ pub(crate) fn topological_sort(
                 }
                 NamedSignalType::Book(_) => vec![],
             })
-            .flat_map(|parents| parents.iter())
-            .filter(|parent| seen_signals.contains(*parent))
+            .flat_map(|parents| parents.into_iter())
+            .filter(|parent| seen_signals.contains(parent.as_str()))
             .collect();
         if parents.len() > 0 {
-            dependencies.insert(*signal, parents);
+            dependencies.insert(signal, parents);
         }
     }
 
     // sort the signals, starting by clearing out the book signals
-    let mut signals_to_clear: Vec<_> = ordered_signals.clone();
+    let mut ordered_signals = Vec::new();
     loop {
         let mut new_empty_signals = Vec::new();
         let starting_size = ordered_signals.len();
 
-        for signal in signals_to_clear.iter() {
-            for (child, parents) in dependencies.iter_mut() {
-                assert!(parents.len() > 0);
-                parents.remove(signal);
-                if parents.len() == 0 {
-                    new_empty_signals.push((*child).clone());
-                }
+        for (child, parents) in dependencies.iter() {
+            if parents.len() == 0 {
+                new_empty_signals.push((*child).clone());
             }
         }
 
         for signal in &new_empty_signals {
-            dependencies.remove(signal);
-            ordered_signals.push(signal.clone());
+            for (child, parents) in dependencies.iter_mut() {
+                parents.remove(signal);
+            }
         }
 
-        signals_to_clear = new_empty_signals;
+        for signal in new_empty_signals {
+            dependencies.remove(&signal);
+            ordered_signals.push(signal);
+        }
 
         if ordered_signals.len() == starting_size {
             if dependencies.len() != 0 {
@@ -135,13 +128,10 @@ pub(crate) fn topological_sort(
 pub(crate) fn generate_calls_for(
     security: &Security,
     mem: Rc<GraphInnerMem>,
-    agg: &GraphAggregateData,
-    objects: Rc<GraphObjectStore>,
 ) -> Result<GraphCallList, GraphError> {
-    let (seen_signals, book_signals) = find_seen_signals(security, &mem.signal_name_to_instance)?;
+    let seen_signals = find_seen_signals(security, &mem.signal_name_to_instance)?;
     let sorted = topological_sort(
         &seen_signals,
-        book_signals.into_iter().collect(),
         &mem.signal_name_to_instance,
     );
 
@@ -149,14 +139,13 @@ pub(crate) fn generate_calls_for(
     // Since we generate indices in terms of call order, this hopefully should be fairly compact
     // per graph
 
-    let mark_as_clean: HashSet<_> = sorted
+    let mark_as_clean: HashSet<_> = mem
+        .signal_output_to_index
         .iter()
-        .map(|sig| {
-            let index = *mem
-                .signal_name_to_index
-                .get(sig)
-                .expect("Late signal found");
-            let (offset, _) = index_to_bitmap(index);
+        .map(|((sig, _), index)| (sig, index))
+        .filter(|(sig, _)| seen_signals.contains(*sig))
+        .map(|(_, index)| {
+            let (offset, _) = index_to_bitmap(*index);
             offset
         })
         .collect();
@@ -166,23 +155,24 @@ pub(crate) fn generate_calls_for(
 
     // now generate list of actual calls
 
-    let mut inner_call_list = Vec::new();
-    let mut book_call_list = Vec::new();
+    let mut calls = Vec::new();
 
     for signal in sorted {
-        let instance = mem
-            .signal_name_to_instance
-            .get(&signal)
-            .expect("Missing call late");
-        let signal_offset = *mem
-            .signal_name_to_index
-            .get(&signal)
-            .expect("MIssing index late");
+        let index = mem.signal_name_to_index.get(&signal).expect("signal name missing late");
+        let object = &mem.objects[*index as usize];
+        // this carefully, carefully, carefully works since we control
+        // when the actual objects are referenced out of the graph list.
+        // This pointer is only dereferenced during the calls, and we won't have
+        // overlapping references
+        let object_ptr = unsafe {
+            object as *const _ as *mut _
+        };
+        calls.push(object_ptr);
     }
 
     Ok(GraphCallList {
-        book_calls: book_call_list,
-        inner_calls: inner_call_list,
+        calls,
         mark_as_clean,
+        mem,
     })
 }
