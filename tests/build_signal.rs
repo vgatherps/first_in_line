@@ -145,7 +145,7 @@ fn construct_graph() {
     let mut graph = registrar.generate_graph(&layout_vec, &sec_map).unwrap();
 
     let book = graph.signal_listener("book", "out").unwrap();
-    let consumer1 = graph.signal_listener("consumer1","out").unwrap();
+    let consumer1 = graph.signal_listener("consumer1", "out").unwrap();
     let consumer2 = graph.signal_listener("consumer2", "out").unwrap();
     let consumer3 = graph.signal_listener("consumer3", "out").unwrap();
 

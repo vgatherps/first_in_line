@@ -165,11 +165,34 @@ impl GraphInnerMem {
             let mut consumer_hooks = HashMap::new();
             let mut aggregate_hooks = HashMap::new();
 
+            for (name, item) in signal_inst.inputs.iter() {
+                if let Some(def) = signal_inst.definition.inputs.get(name.as_str()) {
+                    match (item, def) {
+                        (NamedSignalType::Book(_), SignalType::Book)
+                        | (NamedSignalType::Consumer(_), SignalType::Consumer)
+                        | (NamedSignalType::Aggregate(_), SignalType::Aggregate) => (),
+                        (named, sig_type) => {
+                            return Err(GraphError::InputWrongType {
+                                input: name.clone(),
+                                signal: signal_name.clone(),
+                                given: named.clone(),
+                                wants: sig_type.clone(),
+                            });
+                        }
+                    }
+                } else {
+                    return Err(GraphError::InputNotExist {
+                        input: name.clone(),
+                        signal: signal_name.clone(),
+                    });
+                }
+            }
+
             for name in signal_inst.definition.inputs.keys() {
                 let parents_of_inst = if let Some(parents) = signal_inst.inputs.get(*name) {
                     parents
                 } else {
-                    return Err(GraphError::InputNotFound {
+                    return Err(GraphError::InputNotGiven {
                         input: *name,
                         signal: signal_name.clone(),
                     });

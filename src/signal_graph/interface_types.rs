@@ -149,9 +149,7 @@ impl ConsumerOutput {
     }
 }
 
-impl ConsumerOutput {
-
-}
+impl ConsumerOutput {}
 
 impl AggregateSignal {
     #[inline]

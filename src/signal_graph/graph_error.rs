@@ -1,3 +1,4 @@
+use super::graph_registrar::{NamedSignalType, SignalType};
 use super::security_index::Security;
 use thiserror::Error;
 
@@ -9,14 +10,24 @@ pub enum GraphError {
     DuplicateSignalInstance(String),
     #[error("Signal definition {definition} requested by {signal} not found")]
     DefinitionNotFound { definition: String, signal: String },
+    #[error("Input {input} not given on signal {signal}")]
+    InputNotGiven { input: &'static str, signal: String },
     // TODO test
-    #[error("Input {input} not found on signal {signal}")]
-    InputNotFound { input: &'static str, signal: String },
+    #[error("Input {input} does not exist on signal {}")]
+    InputNotExist { input: String, signal: String },
+    // TODO test
+    #[error("Input {input} on signal {signal} has type {given:?}, has type {wants:?}")]
+    InputWrongType {
+        input: String,
+        signal: String,
+        given: NamedSignalType,
+        wants: SignalType,
+    },
     // TODO test
     #[error("Signal {signal} missing subscription for inputs {inputs:?}")]
     MissingSubscription {
         signal: String,
-        inputs: Vec<&'static str>
+        inputs: Vec<&'static str>,
     },
     // TODO test
     #[error("Book input {security:?} not found")]

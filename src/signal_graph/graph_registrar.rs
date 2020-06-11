@@ -35,14 +35,14 @@ pub(crate) struct SignalInstantiation {
     pub(crate) inputs: HashMap<String, NamedSignalType>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum SignalType {
     Book,
     Consumer,
     Aggregate,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum NamedSignalType {
     Book(Security),
     Consumer((String, String)),
