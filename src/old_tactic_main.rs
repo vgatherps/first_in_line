@@ -1,14 +1,9 @@
 #![recursion_limit = "512"]
-
+#![allow(warnings)]
 //WARNING
 //WARNING
 //
 //I would not abide by all of the given practices in here in production quality trading code
-
-use exchange::{
-    bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
-    BybitType, HuobiType, OkexType,
-};
 
 use crate::exchange::normalized::*;
 use std::io::prelude::*;
@@ -24,6 +19,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use std::collections::{HashMap, HashSet};
 
+use crossbeam_channel::{bounded, TryRecvError};
+
 mod args;
 mod bitmex_http;
 mod displacement;
@@ -32,10 +29,12 @@ mod exchange;
 mod fair_value;
 mod fifo_pnl;
 mod local_book;
+mod md_thread;
 mod order_book;
 mod order_manager;
 mod position_manager;
 mod remote_venue_aggregator;
+mod signal_graph;
 mod tactic;
 
 use fair_value::*;
@@ -57,7 +56,10 @@ fn html_writer(filename: String, requests: mpsc::Receiver<String>) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rt = tokio::runtime::Runtime::new()?;
+    let mut rt = tokio::runtime::Builder::new()
+        .basic_scheduler()
+        .enable_all()
+        .build()?;
     rt.block_on(run())
 }
 
@@ -68,7 +70,6 @@ pub enum TacticInternalEvent {
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
     DisplayHtml,
-    Ping,
     Reset(bool),
 }
 
@@ -81,23 +82,15 @@ enum TacticEventType {
     CheckGone(Side, usize, usize),
     SetLateStatus(Side, usize, usize),
     WriteHtml,
-    Ping,
     Reset,
+    None,
 }
 
 async fn reset_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
-    tokio::time::delay_for(std::time::Duration::from_millis(1000 * 60 * 10)).await;
     assert!(event_queue
         .send(TacticInternalEvent::Reset(false))
         .await
         .is_ok());
-}
-
-async fn ping_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
-    loop {
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 30)).await;
-        assert!(event_queue.send(TacticInternalEvent::Ping).await.is_ok());
-    }
 }
 
 async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>) {
@@ -196,33 +189,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // all incoming messages
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         {
+            let (md_sender, md_receiver) = bounded::<MarketEventBlock>(5000);
+            let md_thread = std::thread::spawn(move || md_thread::start_md_thread(md_sender));
             // and is part of the reset cycle
             let position = position_manager::PositionManager::create(http.clone()).await;
-
-            let (
-                mut bitmex,
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                bybit_usdt,
-                bybit_inverse,
-                huobi,
-                coinbase,
-            ) = join!(
-                bitmex_connection(),
-                okex_connection(OkexType::Spot),
-                okex_connection(OkexType::Swap),
-                okex_connection(OkexType::Quarterly),
-                bybit_connection(BybitType::USDT),
-                bybit_connection(BybitType::Inverse),
-                huobi_connection(HuobiType::Spot),
-                coinbase_connection(),
-            );
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
             tokio::task::spawn(reset_loop(event_queue.clone()));
-            tokio::task::spawn(ping_loop(event_queue.clone()));
             tokio::task::spawn(transaction_loop(
                 get_max_timestamp(None, http.clone()).await.0,
                 http.clone(),
@@ -232,17 +206,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
             let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
 
-            let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                bybit_usdt,
-                bybit_inverse,
-                huobi,
-                coinbase,
-                remote_fair_value,
-                0.001,
-            );
+            let mut remote_agg =
+                remote_venue_aggregator::RemoteVenueAggregator::new(remote_fair_value, 0.001);
 
             let mut local_book = local_book::LocalBook::new(local_fair_value);
 
@@ -264,39 +229,57 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if DIE.load(Ordering::Relaxed) {
                     panic!("Death variable set");
                 }
-                let event_type = select! {
-                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
-                    block = bitmex.next().fuse() => {
-                        TacticEventType::LocalBook(local_book.handle_book_update(&block.events))
-                    },
-                    event = event_reader.recv().fuse() => match event {
-                            Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
-                            Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
-                            Some(TacticInternalEvent::Trades(trades)) => TacticEventType::Trades(trades),
-                            Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
-                            Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
-                            Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
-                            Some(TacticInternalEvent::Reset(is_bad)) => {
-                                if is_bad {
-                                    bad_runs_count += 1;
-                                }
-                                TacticEventType::Reset
-                            },
-                            Some(TacticInternalEvent::Ping) => TacticEventType::Ping,
-                            None => panic!("event queue died"),
-                        },
-                };
-                match &event_type {
-                    TacticEventType::RemoteFair => {
-                        if let Some((rf, rs)) = remote_agg.calculate_fair() {
-                            displacement.handle_remote(rf, rs);
+                let event_type = match md_receiver.try_recv() {
+                    Ok(book) => {
+                        if remote_agg.is_remote_venue(book.exchange) {
+                            remote_agg.update_fair_for(book);
+                            if let Some((rf, rs)) = remote_agg.calculate_fair() {
+                                displacement.handle_remote(rf, rs);
+                            }
+                            Some(TacticEventType::RemoteFair)
+                        } else {
+                            let inside = local_book.handle_book_update(&book.events);
+                            if let Some((_, (local_fair, local_size))) = local_book.get_local_tob()
+                            {
+                                displacement.handle_local(local_fair, local_size);
+                            };
+                            Some(TacticEventType::LocalBook(inside))
                         }
                     }
-                    TacticEventType::LocalBook(_) => {
-                        if let Some((_, (local_fair, local_size))) = local_book.get_local_tob() {
-                            displacement.handle_local(local_fair, local_size);
-                        };
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => panic!("Market data disconnected"),
+                };
+                let event_type = if let Some(event_type) = event_type {
+                    event_type
+                } else {
+                    match event_reader.try_recv() {
+                        Ok(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
+                        Ok(TacticInternalEvent::OrderCanceled(cancel)) => {
+                            TacticEventType::AckCancel(cancel)
+                        }
+                        Ok(TacticInternalEvent::Trades(trades)) => TacticEventType::Trades(trades),
+                        Ok(TacticInternalEvent::CancelStale(side, price, id)) => {
+                            TacticEventType::CancelStale(side, price, id)
+                        }
+                        Ok(TacticInternalEvent::CheckGone(side, price, id)) => {
+                            TacticEventType::CheckGone(side, price, id)
+                        }
+                        Ok(TacticInternalEvent::SetLateStatus(side, price, id)) => {
+                            TacticEventType::SetLateStatus(side, price, id)
+                        }
+                        Ok(TacticInternalEvent::Reset(is_bad)) => {
+                            if is_bad {
+                                bad_runs_count += 1;
+                            }
+                            TacticEventType::Reset
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => TacticEventType::None,
+                        Err(tokio::sync::mpsc::error::TryRecvError::Closed) => {
+                            panic!("event queue died")
+                        }
                     }
+                };
+                match &event_type {
                     TacticEventType::Trades(trades) => {
                         for trade in trades {
                             tactic.check_seen_trade(trade);
@@ -321,10 +304,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         // Do a reset
                         break;
                     }
-                    TacticEventType::Ping => {
-                        let _ = join!(bitmex.ping(), remote_agg.ping());
-                    }
-                    TacticEventType::WriteHtml => (),
+                    TacticEventType::WriteHtml
+                    | TacticEventType::None
+                    | TacticEventType::RemoteFair
+                    | TacticEventType::LocalBook(_) => (),
                 }
                 if let (
                     Some((_, (local_fair, local_size))),
@@ -391,6 +374,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             );
                             html_queue.send(html).expect("Couldn't send html");
                         }
+                        TacticEventType::None => tokio::task::yield_now().await,
 
                         // Already handled
                         TacticEventType::AckCancel(_)
@@ -398,7 +382,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         | TacticEventType::CancelStale(_, _, _)
                         | TacticEventType::CheckGone(_, _, _)
                         | TacticEventType::Reset
-                        | TacticEventType::Ping
                         | TacticEventType::Trades(_) => (),
                     };
                 }

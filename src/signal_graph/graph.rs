@@ -356,8 +356,3 @@ impl Graph {
             .map(|ind| ConsumerInput { which: *ind })
     }
 }
-
-#[no_mangle]
-pub fn check_graph_code(graph: &mut Graph, security: SecurityIndex, time: u128) {
-    graph.trigger_book(security, time);
-}

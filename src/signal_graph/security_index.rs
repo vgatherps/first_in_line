@@ -12,7 +12,16 @@ pub struct Security {
     pub exchange: SmallString,
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+impl Security {
+    pub fn new(exchange: &str, product: &str) -> Security {
+        Security {
+            product: SmallString::from_str(product),
+            exchange: SmallString::from_str(exchange),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct SecurityIndex {
     index: u16,
 }
@@ -20,15 +29,6 @@ pub struct SecurityIndex {
 pub struct SecurityMap {
     securities: HashMap<Security, SecurityIndex>,
     iter_order_securities: Vec<(Security, SecurityIndex)>,
-}
-
-impl Security {
-    pub fn new(product: &str, exchange: &str) -> Security {
-        Security {
-            product: SmallString::from_str(product),
-            exchange: SmallString::from_str(exchange),
-        }
-    }
 }
 
 impl SecurityIndex {
@@ -88,6 +88,12 @@ impl SecurityMap {
 
     pub fn to_index(&self, security: &Security) -> Option<SecurityIndex> {
         self.securities.get(security).map(|s| *s)
+    }
+
+    pub fn to_security(&self, security: SecurityIndex) -> &Security {
+        let sec = &self.iter_order_securities[security.index as usize].0;
+        debug_assert_eq!(self.to_index(sec), Some(security));
+        sec
     }
 
     pub fn len(&self) -> usize {
