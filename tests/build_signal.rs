@@ -11,7 +11,7 @@ struct DummyBookSignal {
     output: ConsumerOutput,
 }
 
-struct DummyConsumerInput {
+struct DummyConsumerSignal {
     output: ConsumerOutput,
     input: ConsumerInput,
 }
@@ -24,7 +24,7 @@ impl CallSignal for DummyBookSignal {
     }
 }
 
-impl CallSignal for DummyConsumerInput {
+impl CallSignal for DummyConsumerSignal {
     fn call_signal(&mut self, time: u128, graph: &GraphHandle) {
         assert!(!self.output.was_written(graph));
         self.output.set(self.input.get(graph).unwrap(), graph);
@@ -55,8 +55,8 @@ impl RegisterSignal for DummyBookSignal {
     }
 }
 
-impl RegisterSignal for DummyConsumerInput {
-    type Child = DummyConsumerInput;
+impl RegisterSignal for DummyConsumerSignal {
+    type Child = DummyConsumerSignal;
     fn get_inputs() -> HashMap<&'static str, SignalType> {
         vec![("input", SignalType::Consumer)].into_iter().collect()
     }
@@ -70,8 +70,8 @@ impl RegisterSignal for DummyConsumerInput {
         _: HashMap<&'static str, BookViewer>,
         mut ins: HashMap<&'static str, ConsumerInput>,
         _: HashMap<&'static str, AggregateSignal>,
-    ) -> DummyConsumerInput {
-        DummyConsumerInput {
+    ) -> DummyConsumerSignal {
+        DummyConsumerSignal {
             output: outs.remove("out").unwrap(),
             input: ins.remove("input").unwrap(),
         }
@@ -82,7 +82,7 @@ impl RegisterSignal for DummyConsumerInput {
 fn construct_graph() {
     let signals = vec![
         ("dummy_book", make_signal_for::<DummyBookSignal>()),
-        ("dummy_signal", make_signal_for::<DummyConsumerInput>()),
+        ("dummy_signal", make_signal_for::<DummyConsumerSignal>()),
     ];
 
     let registrar = GraphRegistrar::new(&signals).unwrap();

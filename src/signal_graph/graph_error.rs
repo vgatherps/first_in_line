@@ -13,6 +13,12 @@ pub enum GraphError {
     #[error("Input {input} not found on signal {signal}")]
     InputNotFound { input: &'static str, signal: String },
     // TODO test
+    #[error("Signal {signal} missing subscription for inputs {inputs:?}")]
+    MissingSubscription {
+        signal: String,
+        inputs: Vec<&'static str>
+    },
+    // TODO test
     #[error("Book input {security:?} not found")]
     BookNotFound { security: Security },
     // TODO test
