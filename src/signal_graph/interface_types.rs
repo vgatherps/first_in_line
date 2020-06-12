@@ -134,6 +134,7 @@ impl ConsumerOutput {
     pub fn set(&mut self, value: f64, graph: &GraphInnerMem) {
         self.inner.get_cell(graph).set(value);
         self.mark_valid(graph);
+        self.mark_written(graph);
     }
 
     #[inline]

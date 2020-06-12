@@ -341,6 +341,7 @@ impl GraphCallList {
 }
 
 impl Graph {
+    pub fn handle_md_events(&mut self, events: &MarketEventBlock, time: u128) {}
     pub fn trigger_book(&mut self, security: SecurityIndex, time: u128) {
         println!("written_bits: {:?}", self.mem.mark_as_written);
         if let Some(calls) = self.book_updates.get_mut(security) {

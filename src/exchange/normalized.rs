@@ -11,7 +11,6 @@ pub fn convert_price_cents(price: f64) -> usize {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
-#[repr(C)]
 pub enum Exchange {
     OkexSpot,
     OkexSwap,
@@ -20,10 +19,8 @@ pub enum Exchange {
     BybitUSDT,
     BybitInverse,
     Coinbase,
-    // Non-used by remote exchanges go below here
-    COUNT,
-    // This is the local exchange
     Bitmex,
+    Ftx,
     // These don't seem to work for some reason
     HuobiSwap,
     HuobiQuarterly,

@@ -1,4 +1,6 @@
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
+use crate::signal_graph::graph_registrar::*;
+use crate::signal_graph::interface_types::*;
 
 #[derive(Default)]
 pub struct FairValueResult {
@@ -16,6 +18,30 @@ pub struct FairValue {
     offset: f64,
     dollars_out: f64,
     levels_out: usize,
+}
+
+pub struct FairValueSignal {
+    fair: FairValue,
+    fair_out: ConsumerOutput,
+    size_out: ConsumerOutput,
+    book: BookViewer,
+}
+
+impl CallSignal for FairValueSignal {
+    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+        let book = self.book_viewer.book();
+        match book.bbo {
+            (Some((bid)), Some((ask))) => {
+                let fair = self.fair.fair_value(book.bids(), book.asks());
+                self.fair_out.set(fair.fair_price);
+                self.size_out.set(fair.fair_shares);
+            },
+            _ => {
+                self.fair_out.mark_invalid();
+                self.size_out.mark_invalid();
+            },
+        }
+    }
 }
 
 /**

@@ -6,6 +6,11 @@ use crate::exchange::{
 
 use crate::signal_graph::security_index::*;
 
+pub struct MarketDataStream {
+    inner: InnerMarketDataStream,
+    index: SecurityIndex,
+}
+
 pub async fn reader_from_security(sec: &Security) -> Result<MarketDataStream, &Security> {
     match (sec.exchange.as_str(), sec.product.as_str()) {
         ("bitmex", "BTCMEX") => Ok(bitmex_connection().await),
