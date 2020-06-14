@@ -102,22 +102,16 @@ pub(crate) fn topological_sort(
                 new_empty_signals.push((*child).clone());
             }
         }
-        println!("Start cycle");
-        println!("{:?}", dependencies);
-        println!("{:?}", new_empty_signals);
-
         for signal in &new_empty_signals {
             for (child, parents) in dependencies.iter_mut() {
                 parents.remove(signal);
             }
         }
-        println!("{:?}", dependencies);
 
         for signal in new_empty_signals {
             dependencies.remove(&signal);
             ordered_signals.push(signal);
         }
-        println!("{:?}", dependencies);
 
         if ordered_signals.len() == starting_size {
             if dependencies.len() != 0 {

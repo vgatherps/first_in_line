@@ -47,13 +47,13 @@ impl RegisterSignal for DummyBookSignal {
 
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
-        _: HashMap<&'static str, BookViewer>,
-        _: HashMap<&'static str, ConsumerInput>,
-        _: HashMap<&'static str, AggregateSignal>,
-    ) -> DummyBookSignal {
-        DummyBookSignal {
+        _: InputLoader,
+        json: Option<&str>
+    ) -> Result<DummyBookSignal, anyhow::Error> {
+        assert_eq!(json, None);
+        Ok(DummyBookSignal {
             output: outs.remove("out").unwrap(),
-        }
+        })
     }
 }
 
@@ -69,14 +69,14 @@ impl RegisterSignal for DummyConsumerSignal {
 
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
-        _: HashMap<&'static str, BookViewer>,
-        mut ins: HashMap<&'static str, ConsumerInput>,
-        _: HashMap<&'static str, AggregateSignal>,
-    ) -> DummyConsumerSignal {
-        DummyConsumerSignal {
+        mut ins: InputLoader,
+        json: Option<&str>
+    ) -> Result<DummyConsumerSignal, anyhow::Error> {
+        assert_eq!(json, None);
+        Ok(DummyConsumerSignal {
             output: outs.remove("out").unwrap(),
-            input: ins.remove("input").unwrap(),
-        }
+            input: ins.load_input("input")?,
+        })
     }
 }
 
@@ -123,7 +123,7 @@ fn test_not_found() {
         },
     )];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::DefinitionNotFound{definition, signal} => {
         assert_eq!(definition, "nonexistant");
         assert_eq!(signal, "wont_exist");
@@ -158,7 +158,7 @@ fn test_input_not_exist() {
         },
     )];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::InputNotExist{signal, input} => {
         assert_eq!(signal, "dummy_sig");
         assert_eq!(input, "not_found");
@@ -187,7 +187,7 @@ fn test_input_type_mismatch() {
         },
     )];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::InputWrongType{input, signal, given, wants} => {
         assert_eq!(signal, "dummy_sig");
         assert_eq!(input, "input");
@@ -222,7 +222,7 @@ fn test_input_not_covered() {
         },
     )];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::InputNotGiven{input, signal} => {
         assert_eq!(signal, "dummy_sig");
         assert_eq!(input, "input");
@@ -255,7 +255,7 @@ fn test_duplicate_instance() {
         ),
     ];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::DuplicateSignalInstance(signal) => {
         assert_eq!(signal, "dummy_sig");
     }
@@ -283,7 +283,7 @@ fn test_parent_not_found() {
         },
     )];
 
-    check_error!(registrar.generate_graph(&layout, &sec_map),
+    check_error!(registrar.generate_graph(&layout, &sec_map, &HashMap::new()),
     GraphError::ParentNotFound{child, parent, input, output} => {
         assert_eq!(child, "parent_not_found");
         assert_eq!(parent, "not_found");

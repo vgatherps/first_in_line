@@ -33,6 +33,7 @@ impl CallSignal for DummyConsumerSignal {
 
 impl RegisterSignal for DummyBookSignal {
     type Child = DummyBookSignal;
+    const PARAMS: bool = false;
 
     fn get_inputs() -> HashMap<&'static str, SignalType> {
         let signals = vec![("input", SignalType::Book)];
@@ -45,18 +46,19 @@ impl RegisterSignal for DummyBookSignal {
 
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
-        _: HashMap<&'static str, BookViewer>,
-        _: HashMap<&'static str, ConsumerInput>,
-        _: HashMap<&'static str, AggregateSignal>,
-    ) -> DummyBookSignal {
-        DummyBookSignal {
+        _: InputLoader,
+        json: Option<&str>
+    ) -> Result<DummyBookSignal, anyhow::Error> {
+        assert_eq!(json, None);
+        Ok(DummyBookSignal {
             output: outs.remove("out").unwrap(),
-        }
+        })
     }
 }
 
 impl RegisterSignal for DummyConsumerSignal {
     type Child = DummyConsumerSignal;
+    const PARAMS: bool = false;
     fn get_inputs() -> HashMap<&'static str, SignalType> {
         vec![("input", SignalType::Consumer)].into_iter().collect()
     }
@@ -67,14 +69,14 @@ impl RegisterSignal for DummyConsumerSignal {
 
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
-        _: HashMap<&'static str, BookViewer>,
-        mut ins: HashMap<&'static str, ConsumerInput>,
-        _: HashMap<&'static str, AggregateSignal>,
-    ) -> DummyConsumerSignal {
-        DummyConsumerSignal {
+        mut input: InputLoader,
+        json: Option<&str>
+    ) -> Result<DummyConsumerSignal, anyhow::Error> {
+        assert_eq!(json, None);
+        Ok(DummyConsumerSignal {
             output: outs.remove("out").unwrap(),
-            input: ins.remove("input").unwrap(),
-        }
+            input: input.load_input("input")?,
+        })
     }
 }
 
@@ -142,16 +144,13 @@ fn construct_graph() {
         ),
     ];
 
-    let mut graph = registrar.generate_graph(&layout_vec, &sec_map).unwrap();
+    let mut graph = registrar.generate_graph(&layout_vec, &sec_map, &HashMap::new()).unwrap();
 
     let book = graph.signal_listener("book", "out").unwrap();
     let consumer1 = graph.signal_listener("consumer1", "out").unwrap();
     let consumer2 = graph.signal_listener("consumer2", "out").unwrap();
     let consumer3 = graph.signal_listener("consumer3", "out").unwrap();
 
-    graph.trigger_book(sec_map.to_index(&btc).unwrap(), 0);
-    graph.trigger_book(sec_map.to_index(&btc).unwrap(), 0);
-    graph.trigger_book(sec_map.to_index(&btc).unwrap(), 0);
-    graph.trigger_book(sec_map.to_index(&btc).unwrap(), 0);
-    graph.trigger_book(sec_map.to_index(&btc).unwrap(), 0);
+    let data = vec![].into_iter().collect();
+    graph.trigger_book(sec_map.to_index(&btc).unwrap(), &data, 0, |_, _| ());
 }
