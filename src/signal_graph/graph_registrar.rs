@@ -22,11 +22,12 @@ pub struct SignalDefinition {
     pub(crate) outputs: HashSet<&'static str>,
     pub(crate) creator: fn(
         outputs: HashMap<&'static str, ConsumerOutput>,
-        books: HashMap<&'static str, BookViewer>,
-        input: HashMap<&'static str, ConsumerInput>,
-        aggregators: HashMap<&'static str, AggregateSignal>,
+        inputs: InputLoader,
+        json: Option<&str>,
+        name: &str,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
-    ) -> u16,
+    ) -> Result<u16, GraphError>,
+    pub(crate) cleanup: bool,
 }
 
 #[derive(Clone)]
@@ -72,6 +73,7 @@ impl GraphRegistrar {
         &self,
         layout: &[(String, SignalCall)],
         security_map: &SecurityMap,
+        inits: &HashMap<String, String>,
     ) -> Result<Graph, GraphError> {
         let mut signal_to_instance = HashMap::new();
         for (name, call) in layout {
@@ -96,7 +98,7 @@ impl GraphRegistrar {
             );
         }
 
-        let inner_mem = GraphInnerMem::new(signal_to_instance, layout, security_map)?;
+        let inner_mem = GraphInnerMem::new(signal_to_instance, layout, security_map, inits)?;
         let requested_book_signals: HashSet<_> = layout
             .iter()
             .map(|(_, b)| b)
@@ -133,41 +135,73 @@ impl GraphRegistrar {
 
 pub trait CallSignal {
     fn call_signal(&mut self, time: u128, graph: &GraphInnerMem);
+    fn cleanup(&mut self, _: &GraphInnerMem) {
+        unimplemented!("Cleanup called for signal without implementation, check your registrations")
+    }
 }
 
 pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() -> SignalDefinition {
     fn _real_create<F: CallSignal + RegisterSignal<Child = F> + 'static>(
         outputs: HashMap<&'static str, ConsumerOutput>,
-        books: HashMap<&'static str, BookViewer>,
-        consumers: HashMap<&'static str, ConsumerInput>,
-        aggregators: HashMap<&'static str, AggregateSignal>,
+        inputs: InputLoader,
+        json: Option<&str>,
+        name: &str,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
-    ) -> u16 {
-        let val = F::create(outputs, books, consumers, aggregators);
+    ) -> Result<u16, GraphError> {
+        if json.is_some() && !F::PARAMS {
+            return Err(GraphError::NodeGotParams(name.to_string()));
+        }
+        if json.is_none() && F::PARAMS {
+            return Err(GraphError::NodeNoParams(name.to_string()));
+        }
+        let val = match F::create(outputs, inputs, json) {
+            Ok(val) => val,
+            Err(err) => return Err(GraphError::NodeInitError(err)),
+        };
         // BOOOOO rust and weird type specification problems
         // make it impossible to do this another way.
         let index = objects.len();
         dynstack::dyn_push!(objects, val);
 
         assert!(index < std::u16::MAX as usize);
-        index as u16
+        Ok(index as u16)
     }
 
     SignalDefinition {
         inputs: T::get_inputs(),
         outputs: T::get_outputs(),
         creator: _real_create::<T>,
+        cleanup: T::CLEANUP,
+    }
+}
+
+pub struct InputLoader {
+    pub(crate) all_inputs: HashMap<&'static str, Box<dyn Any>>,
+}
+
+impl InputLoader {
+    pub fn load_input<T: InputType>(&mut self, name: &'static str) -> Result<T, anyhow::Error> {
+        if let Some(signal) = self.all_inputs.remove(name) {
+            if let Ok(downcast) = signal.downcast::<T>() {
+                Ok(*downcast)
+            } else {
+                anyhow::bail!("Wong type requested on input {}", name);
+            }
+        } else {
+            anyhow::bail!("Could not find signal for input {}", name);
+        }
     }
 }
 
 pub trait RegisterSignal {
-    type Child;
+    type Child: CallSignal + 'static;
+    const PARAMS: bool = true;
+    const CLEANUP: bool = false;
     fn get_inputs() -> HashMap<&'static str, SignalType>;
     fn get_outputs() -> HashSet<&'static str>;
     fn create(
         outputs: HashMap<&'static str, ConsumerOutput>,
-        books: HashMap<&'static str, BookViewer>,
-        consumers: HashMap<&'static str, ConsumerInput>,
-        aggregators: HashMap<&'static str, AggregateSignal>,
-    ) -> Self::Child;
+        inputs: InputLoader,
+        json: Option<&str>,
+    ) -> Result<Self::Child, anyhow::Error>;
 }

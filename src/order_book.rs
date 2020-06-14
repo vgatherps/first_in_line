@@ -170,6 +170,14 @@ impl OrderBook {
         )
     }
 
+    #[inline]
+    pub fn bbo_price(&self) -> (Option<usize>, Option<usize>) {
+        (
+            self.bids.iter().next().map(|(prc, _)| prc.unsigned()),
+            self.asks.iter().next().map(|(prc, _)| prc.unsigned()),
+        )
+    }
+
     pub fn bids(&self) -> impl Iterator<Item = (&BuyPrice, &f64)> {
         self.bids.iter()
     }

@@ -1,41 +1,63 @@
-#[derive(Copy, Clone)]
+use crate::signal_graph::graph_registrar::*;
+use crate::signal_graph::interface_types::*;
+use serde::Deserialize;
+
+use std::collections::{HashMap, HashSet};
+
 pub struct Ema {
-    value: Option<f64>,
+    input: ConsumerInput,
+    value: ConsumerOutput,
     ratio: f64,
     cur_ratio: f64,
 }
 
-impl Ema {
-    pub fn new(ratio: f64) -> Ema {
-        assert!(ratio > 0.0);
-        assert!(ratio <= 1.0);
-        Ema {
-            value: None,
-            ratio,
-            cur_ratio: 0.5,
+#[derive(Deserialize)]
+struct EmaInit {
+    ratio: f64,
+}
+
+impl CallSignal for Ema {
+    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+        let result_valid = self
+            .input
+            .get(graph)
+            .map(|new_value| match self.value.get(graph) {
+                Some(value) => {
+                    let ratio = self.cur_ratio;
+                    self.cur_ratio = 0.95 * self.cur_ratio + 0.05 * self.ratio;
+                    value * (1.0 - ratio) + ratio * new_value
+                }
+                None => new_value,
+            });
+        self.value.set_from(result_valid, graph);
+    }
+}
+
+impl RegisterSignal for Ema {
+    type Child = Ema;
+    fn get_inputs() -> HashMap<&'static str, SignalType> {
+        maplit::hashmap! {
+            "input" => SignalType::Consumer,
         }
     }
 
-    pub fn get_value(&self) -> Option<f64> {
-        self.value
+    fn get_outputs() -> HashSet<&'static str> {
+        maplit::hashset! {
+            "output"
+        }
     }
 
-    pub fn get_value_zero(&self) -> f64 {
-        self.value.unwrap_or(0.0)
-    }
-
-    pub fn add_value(&mut self, new_value: f64) -> f64 {
-        let new_result = match self.value {
-            Some(value) => {
-                let ratio = self.cur_ratio;
-                self.cur_ratio = 0.95 * self.cur_ratio + 0.05 * self.ratio;
-                value * (1.0 - ratio) + ratio * new_value
-            }
-            None => new_value,
-        };
-
-        self.value = Some(new_result);
-
-        new_result
+    fn create(
+        mut outputs: HashMap<&'static str, ConsumerOutput>,
+        mut inputs: InputLoader,
+        json: Option<&str>,
+    ) -> Result<Self, anyhow::Error> {
+        let init = serde_json::from_str::<EmaInit>(json.unwrap())?;
+        Ok(Ema {
+            input: inputs.load_input("input")?,
+            value: outputs.remove("output").unwrap(),
+            ratio: init.ratio,
+            cur_ratio: 0.5,
+        })
     }
 }

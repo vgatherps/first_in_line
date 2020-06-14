@@ -64,4 +64,13 @@ pub enum GraphError {
         signals: Vec<String>,
         security: Security,
     },
+    // TODO test
+    #[error("Signal {0} did not receive parameters")]
+    NodeNoParams(String),
+    // TODO test
+    #[error("Signal {0} received parameters but cannot take them")]
+    NodeGotParams(String),
+    // TODO test
+    #[error(transparent)]
+    NodeInitError(anyhow::Error),
 }

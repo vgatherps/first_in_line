@@ -1,98 +1,68 @@
-use crate::exchange::normalized::*;
-use crate::fair_value::FairValue;
-use crate::order_book::*;
+use crate::signal_graph::graph_registrar::*;
+use crate::signal_graph::interface_types::*;
 
-use horrorshow::html;
+use std::collections::{HashMap, HashSet};
 
-pub struct LocalBook {
-    fair: FairValue,
-    tob: Option<((usize, usize), (f64, f64))>,
-    book: OrderBook,
+pub struct BookImprovedSignal {
+    book: BookViewer,
+    improved_bid_to: ConsumerOutput,
+    improved_ask_to: ConsumerOutput,
+    tob: Option<(usize, usize)>,
 }
 
-#[derive(Debug)]
-pub struct InsideOrder {
-    pub insert_price: usize,
-    pub insert_size: f64,
-    pub side: Side,
-}
-
-impl LocalBook {
-    pub fn new(fair: FairValue) -> LocalBook {
-        LocalBook {
-            fair,
-            tob: None,
-            book: OrderBook::new(),
-        }
-    }
-
-    pub fn get_local_tob(&self) -> Option<((usize, usize), (f64, f64))> {
-        self.tob
-    }
-
-    pub fn book(&self) -> &OrderBook {
-        &self.book
-    }
-
-    pub fn handle_book_update(&mut self, events: &SmallVec<MarketEvent>) -> SmallVec<InsideOrder> {
-        for event in events {
-            self.book.handle_book_event(event);
-        }
-        match self.book.bbo() {
-            (Some((bid, _)), Some((ask, _))) => {
-                let fair = self
-                    .fair
-                    .fair_value(self.book.bids(), self.book.asks(), (bid, ask));
-                // find all of the new bids, and all of the new asks
-                let new_levels = if let Some(((old_bid, old_ask), _)) = self.tob {
-                    let bids = self
-                        .book
-                        .bids()
-                        .take_while(|(prc, _)| prc.unsigned() > old_bid)
-                        .map(|(prc, size)| InsideOrder {
-                            side: Side::Buy,
-                            insert_price: prc.unsigned(),
-                            insert_size: *size,
-                        });
-                    let asks = self
-                        .book
-                        .asks()
-                        .take_while(|(prc, _)| prc.unsigned() < old_ask)
-                        .map(|(prc, size)| InsideOrder {
-                            side: Side::Sell,
-                            insert_price: prc.unsigned(),
-                            insert_size: *size,
-                        });
-                    bids.chain(asks).collect()
-                } else {
-                    SmallVec::new()
-                };
-                self.tob = Some(((bid, ask), (fair.fair_price, fair.fair_shares)));
-                new_levels
-            }
-            _ => SmallVec::new(),
-        }
-    }
-
-    pub fn get_html_info(&self) -> String {
-        if let Some(((bprice, aprice), (fair, size))) = self.tob {
-            format!(
-                "{}",
-                html! {
-                    h3(id="remote heading", class="title") : "Local fair value summary";
-                    ul(id="Local book info") {
-                        li(first?=true, class="item") {
-                            : format!("Local bbo: {:.2}x{:.2}, fair {:.2}, fair size {:.2}",
-                                      bprice as f64 * 0.01,
-                                      aprice as f64 * 0.01,
-                                      fair,
-                                      size);
+impl CallSignal for BookImprovedSignal {
+    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+        match self.book.book().bbo_price() {
+            (Some(best_bid), Some(best_ask)) => {
+                match self.tob {
+                    Some((old_bid, old_ask)) => {
+                        if best_bid > old_bid {
+                            self.improved_bid_to.set(best_bid as f64, graph);
+                        }
+                        if best_ask < old_ask {
+                            self.improved_ask_to.set(best_ask as f64, graph);
                         }
                     }
-                }
-            )
-        } else {
-            String::new()
+                    _ => (),
+                };
+                self.tob = Some((best_bid, best_ask));
+            }
+            _ => (),
         }
+    }
+
+    fn cleanup(&mut self, graph: &GraphHandle) {
+        self.improved_bid_to.mark_invalid(graph);
+        self.improved_ask_to.mark_invalid(graph);
+    }
+}
+
+impl RegisterSignal for BookImprovedSignal {
+    const CLEANUP: bool = true;
+    type Child = Self;
+    fn get_inputs() -> HashMap<&'static str, SignalType> {
+        maplit::hashmap! {
+            "book" => SignalType::Book,
+        }
+    }
+
+    fn get_outputs() -> HashSet<&'static str> {
+        maplit::hashset! {
+            "improved_bid",
+            "improved_ask",
+        }
+    }
+
+    fn create(
+        mut outputs: HashMap<&'static str, ConsumerOutput>,
+        mut inputs: InputLoader,
+        _: Option<&str>,
+    ) -> Result<BookImprovedSignal, anyhow::Error> {
+        Ok(BookImprovedSignal {
+            improved_bid_to: outputs.remove("improved_bid").unwrap(),
+            improved_ask_to: outputs.remove("improved_ask").unwrap(),
+            book: inputs.load_input("book")?,
+            tob: None,
+        })
     }
 }

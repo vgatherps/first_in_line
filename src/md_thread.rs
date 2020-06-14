@@ -7,12 +7,13 @@ use futures::{
 
 use std::sync::Arc;
 
-use crate::exchange::normalized::*;
+use crate::exchange::normalized::MarketEventBlock;
 use crate::exchange::{
     bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
     BybitType, HuobiType, OkexType,
 };
 use crate::security_to_reader;
+use crate::security_to_reader::MarketDataStream;
 use crate::signal_graph::security_index::{SecurityIndex, SecurityMap};
 
 // Futures select_all allocates EVERY SINGLE TIME IT GETS CALLED, which is absurd.
@@ -31,20 +32,17 @@ pub struct SelectAllMd {
 impl Unpin for SelectAllMd {}
 
 impl Future for &mut SelectAllMd {
-    type Output = MarketEventBlock;
+    type Output = (SecurityIndex, MarketEventBlock);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let item = self
-            .md
-            .iter_mut()
-            .find_map(|f| {
-                let mut next = f.next();
-                pin_mut!(next);
-                match next.poll(cx) {
-                    Poll::Pending => None,
-                    Poll::Ready(e) => Some(e),
-                }
-            });
+        let item = self.md.iter_mut().find_map(|f| {
+            let mut next = f.next();
+            pin_mut!(next);
+            match next.poll(cx) {
+                Poll::Pending => None,
+                Poll::Ready(e) => Some(e),
+            }
+        });
         match item {
             Some(res) => Poll::Ready(res),
             None => Poll::Pending,
@@ -53,16 +51,13 @@ impl Future for &mut SelectAllMd {
 }
 
 async fn run_md_thread(
-    queue: Sender<MarketEventBlock>,
+    queue: Sender<(SecurityIndex, MarketEventBlock)>,
     securities: Vec<SecurityIndex>,
     map: Arc<SecurityMap>,
 ) {
     let md_streams: Vec<_> = securities
         .into_iter()
-        .map(|i| {
-            let security = map.to_security(i);
-            security_to_reader::reader_from_security(security)
-        })
+        .map(|i| security_to_reader::reader_from_security(i, &map))
         .collect();
     let md_streams: Vec<_> = join_all(md_streams)
         .await
@@ -90,7 +85,7 @@ async fn run_md_thread(
 }
 
 pub fn start_md_thread(
-    sender: Sender<MarketEventBlock>,
+    sender: Sender<(SecurityIndex, MarketEventBlock)>,
     securities: Vec<SecurityIndex>,
     map: Arc<SecurityMap>,
 ) {

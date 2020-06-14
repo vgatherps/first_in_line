@@ -107,7 +107,6 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         Exchange::BybitInverse => {
             crate::exchange::bybit_connection(crate::exchange::bybit::BybitType::Inverse).await
         }
-        Exchange::COUNT => panic!("Not valid to do this lookup"),
     }
     .stream
 }

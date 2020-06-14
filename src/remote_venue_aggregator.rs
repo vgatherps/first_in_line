@@ -4,147 +4,76 @@ use crate::fair_value::FairValue;
 use crate::order_book::OrderBook;
 use futures::{future::FutureExt, join, select};
 
-use horrorshow::html;
+use crate::signal_graph::graph_registrar::*;
+use crate::signal_graph::interface_types::*;
+
+use std::collections::{HashMap, HashSet};
 
 // Hardcoded because futures are a bit silly for selecting variable amounts
 pub struct RemoteVenueAggregator {
-    okex_spot: MarketDataStream,
-    okex_swap: MarketDataStream,
-    okex_quarterly: MarketDataStream,
-    bybit_usdt: MarketDataStream,
-    bybit_inverse: MarketDataStream,
-    huobi: MarketDataStream,
-    coinbase: MarketDataStream,
-    books: [OrderBook; Exchange::COUNT as usize],
-    fairs: [f64; Exchange::COUNT as usize],
-    size_ema: [Ema; Exchange::COUNT as usize],
-    valuer: FairValue,
+    fairs: Vec<(ConsumerInput, ConsumerInput)>,
+    fair_mid: ConsumerOutput,
+    total_size: ConsumerOutput,
 }
 
-impl RemoteVenueAggregator {
-    pub fn new(
-        okex_spot: MarketDataStream,
-        okex_swap: MarketDataStream,
-        okex_quarterly: MarketDataStream,
-        bybit_usdt: MarketDataStream,
-        bybit_inverse: MarketDataStream,
-        huobi: MarketDataStream,
-        coinbase: MarketDataStream,
-        valuer: FairValue,
-        size_ratio: f64,
-    ) -> RemoteVenueAggregator {
-        RemoteVenueAggregator {
-            okex_spot,
-            okex_swap,
-            okex_quarterly,
-            bybit_usdt,
-            bybit_inverse,
-            huobi,
-            coinbase,
-            valuer,
-            fairs: Default::default(),
-            size_ema: [Ema::new(size_ratio); Exchange::COUNT as usize],
-            books: Default::default(),
+impl RegisterSignal for RemoteVenueAggregator {
+    type Child = RemoteVenueAggregator;
+
+    fn get_inputs() -> HashMap<&'static str, SignalType> {
+        maplit::hashmap! {
+            "fair_mids" => SignalType::Aggregate,
+            "fair_sizes" => SignalType::Aggregate,
         }
     }
 
-    fn update_fair_for(&mut self, block: MarketEventBlock) {
-        let book = &mut self.books[block.exchange as usize];
-        for event in block.events {
-            book.handle_book_event(&event);
-        }
-        match book.bbo() {
-            (Some((bid, _)), Some((ask, _))) => {
-                let new_fair = self.valuer.fair_value(book.bids(), book.asks(), (bid, ask));
-                self.fairs[block.exchange as usize] = new_fair.fair_price;
-                self.size_ema[block.exchange as usize].add_value(new_fair.fair_shares);
-            }
-            _ => (),
+    fn get_outputs() -> HashSet<&'static str> {
+        maplit::hashset! {
+            "fair",
+            "size",
         }
     }
 
-    pub fn calculate_fair(&self) -> Option<(f64, f64)> {
+    // TODO combine inputs into one big friendly structure hiding them behind any
+    fn create(
+        mut outputs: HashMap<&'static str, ConsumerOutput>,
+        mut inputs: InputLoader,
+        json: Option<&str>,
+    ) -> Result<Self, anyhow::Error> {
+        let json = json.unwrap();
+        let fairs: Vec<_> = inputs
+            .load_input::<AggregateInput>("fair_mids")?
+            .as_consumer_iter()
+            .collect();
+        let sizes: Vec<_> = inputs
+            .load_input::<AggregateInput>("fair_sizes")?
+            .as_consumer_iter()
+            .collect();
+        assert_eq!(fairs.len(), sizes.len());
+        Ok(RemoteVenueAggregator {
+            fairs: fairs.into_iter().zip(sizes.into_iter()).collect(),
+            fair_mid: outputs.remove("fair").unwrap(),
+            total_size: outputs.remove("size").unwrap(),
+        })
+    }
+}
+
+impl CallSignal for RemoteVenueAggregator {
+    // TODO only iterate over changed, although... that requires better zipping api
+    // for the aggregate updates. Must think about how to do such a thing
+    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
         let mut total_price = 0.0;
         let mut total_size = 0.0;
-        for i in 0..(Exchange::COUNT as usize) {
-            let size = self.size_ema[i].get_value().unwrap_or(0.0);
-            assert!(size >= 0.0);
-            if size < 10.0 {
-                return None;
+        for (fair, size) in self.fairs.iter() {
+            if let Some((fair, size)) = fair.and(&size, graph).get() {
+                total_price += fair * size;
+                total_size += size;
+            } else {
+                self.fair_mid.mark_invalid(graph);
+                self.total_size.mark_invalid(graph);
+                return;
             }
-            total_price += self.fairs[i] * size;
-            total_size += size;
         }
-        Some((total_price / total_size, total_size))
-    }
-
-    // TODO think about fair spread
-    pub async fn get_new_fair(&mut self) {
-        select! {
-            b = self.okex_spot.next().fuse() => self.update_fair_for(b),
-            b = self.okex_swap.next().fuse() => self.update_fair_for(b),
-            b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
-            b = self.huobi.next().fuse() => self.update_fair_for(b),
-            b = self.coinbase.next().fuse() => self.update_fair_for(b),
-            b = self.bybit_usdt.next().fuse() => self.update_fair_for(b),
-            b = self.bybit_inverse.next().fuse() => self.update_fair_for(b),
-        }
-    }
-
-    pub async fn ping(&mut self) {
-        let _ = join!(
-            self.okex_spot.ping(),
-            self.okex_swap.ping(),
-            self.okex_quarterly.ping(),
-            self.huobi.ping(),
-            self.coinbase.ping(),
-            self.bybit_usdt.ping(),
-            self.bybit_inverse.ping(),
-        );
-    }
-
-    pub fn get_exchange_description(&self, exch: Exchange) -> String {
-        format!(
-            "fair value: {:.2}, fair size: {:.0}",
-            self.fairs[exch as usize],
-            self.size_ema[exch as usize].get_value().unwrap_or(0.0)
-        )
-    }
-
-    pub fn get_html_info(&self) -> String {
-        format!(
-            "{}",
-            html! {
-                // attributes
-                h3(id="remote heading", class="title") : "Remote fair value summary";
-                ul(id="Fair values") {
-                    li(first?=false, class="item") {
-                        : format!("OkexSpot: {}", self.get_exchange_description(Exchange::OkexSpot))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("OkexSwap: {}", self.get_exchange_description(Exchange::OkexSwap))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("OkexQuarterly: {}", self.get_exchange_description(Exchange::OkexQuarterly))
-                    }
-
-                    li(first?=false, class="item") {
-                        : format!("BybitUSDT: {}", self.get_exchange_description(Exchange::BybitUSDT))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("BybitInverse: {}", self.get_exchange_description(Exchange::BybitInverse))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Huobi: {}", self.get_exchange_description(Exchange::HuobiSpot))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Coinbase: {}", self.get_exchange_description(Exchange::Coinbase))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("Fair value+size: {:?}", self.calculate_fair().unwrap_or((0.0, 0.0)))
-                    }
-                }
-            }
-        )
+        self.fair_mid.set(total_price / total_size, graph);
+        self.total_size.set(total_size, graph);
     }
 }

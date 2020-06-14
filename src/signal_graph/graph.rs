@@ -1,8 +1,10 @@
 use std::any::Any;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
+
+use crate::exchange::normalized::{MarketEvent, SmallVec};
 
 use crate::order_book::OrderBook;
 
@@ -22,7 +24,7 @@ pub struct GraphInnerMem {
     pub(crate) output_values: Vec<Cell<f64>>,
     pub(crate) mark_as_written: Vec<Cell<u64>>,
     pub(crate) mark_as_valid: Vec<Cell<u64>>,
-    pub(crate) books: SecurityVector<Rc<OrderBook>>,
+    pub(crate) books: SecurityVector<Rc<RefCell<OrderBook>>>,
     pub(crate) signal_output_to_index: HashMap<(String, String), u16>,
     pub(crate) signal_name_to_index: HashMap<String, u16>,
     pub(crate) signal_name_to_instance: HashMap<String, SignalInstantiation>,
@@ -39,7 +41,10 @@ pub(crate) fn index_to_bitmap(index: u16) -> (u16, u16) {
 }
 
 pub(crate) struct GraphCallList {
+    // TODO pull out specific functions from vtable
+    // not high importance, only worth doing after proper testing is in place
     pub(crate) calls: Vec<*mut CallSignal>,
+    pub(crate) cleanup: Vec<*mut CallSignal>,
     pub(crate) mem: Rc<GraphInnerMem>,
     pub(crate) mark_as_clean: Vec<u16>,
 }
@@ -63,6 +68,7 @@ impl GraphInnerMem {
         signal_name_to_instance: HashMap<String, SignalInstantiation>,
         layout: &[(String, SignalCall)],
         security_map: &SecurityMap,
+        params: &HashMap<String, String>,
     ) -> Result<Rc<GraphInnerMem>, GraphError> {
         assert!(signal_name_to_instance.len() < std::u16::MAX as usize);
 
@@ -139,7 +145,8 @@ impl GraphInnerMem {
             .take(bitmap_estimate)
             .collect();
 
-        let books = SecurityVector::new_with(security_map, |_, _| Rc::new(OrderBook::new()));
+        let books =
+            SecurityVector::new_with(security_map, |_, _| Rc::new(RefCell::new(OrderBook::new())));
 
         let mut ordered_signals: Vec<_> = signal_output_to_index.iter().collect();
 
@@ -161,9 +168,7 @@ impl GraphInnerMem {
                 // This isn't a returned error since it implies a core inconsistency in the
                 // graph memory object
                 .expect("Must find signal name deep in building");
-            let mut book_hooks = HashMap::new();
-            let mut consumer_hooks = HashMap::new();
-            let mut aggregate_hooks = HashMap::new();
+            let mut hooks = HashMap::<_, Box<dyn Any>>::new();
 
             for (name, item) in signal_inst.inputs.iter() {
                 if let Some(def) = signal_inst.definition.inputs.get(name.as_str()) {
@@ -200,11 +205,11 @@ impl GraphInnerMem {
                 match parents_of_inst {
                     NamedSignalType::Book(sec) => {
                         if let Some(index) = security_map.to_index(sec) {
-                            book_hooks.insert(
+                            hooks.insert(
                                 *name,
-                                BookViewer {
+                                Box::new(BookViewer {
                                     book: books.get(index).clone(),
-                                },
+                                }),
                             );
                         } else {
                             return Err(GraphError::BookNotFound {
@@ -221,7 +226,7 @@ impl GraphInnerMem {
                             name,
                         )?;
                         let consumer_signal = ConsumerInput { which: consumer };
-                        consumer_hooks.insert(*name, consumer_signal);
+                        hooks.insert(*name, Box::new(consumer_signal));
                     }
                     NamedSignalType::Aggregate(parents) => {
                         if parents.len() == 0 {
@@ -249,10 +254,10 @@ impl GraphInnerMem {
                             aggregate_offsets.push(consumer);
                         }
                         let range_end = aggregate_offsets.len();
-                        let aggregate_signal = AggregateSignal {
+                        let aggregate_signal = AggregateInput {
                             offsets: (range_start as u16)..(range_end as u16),
                         };
-                        aggregate_hooks.insert(*name, aggregate_signal);
+                        hooks.insert(*name, Box::new(aggregate_signal));
                     }
                 }
             }
@@ -273,13 +278,15 @@ impl GraphInnerMem {
                 );
             }
 
+            let input: Option<&str> = params.get(signal_name).map(|s| s.as_str());
+
             let index = (signal_inst.definition.creator)(
                 output_hooks,
-                book_hooks,
-                consumer_hooks,
-                aggregate_hooks,
+                InputLoader { all_inputs: hooks },
+                input,
+                signal_name,
                 &mut objects,
-            );
+            )?;
             assert_eq!(
                 signal_name_to_index.insert(signal_name.clone(), index),
                 None
@@ -329,9 +336,14 @@ impl GraphCallList {
             let call = unsafe { &mut **call };
             call.call_signal(time, graph);
         }
+    }
 
+    fn cleanup(&mut self, time: u128, graph: &GraphInnerMem) {
+        for call in self.cleanup.iter() {
+            let call = unsafe { &mut **call };
+            call.call_signal(time, graph);
+        }
         let mark_slice = &self.mem.mark_as_written[..];
-        println!("Marking {:?}", mark_slice);
         for to_mark in &self.mark_as_clean {
             let to_mark = *to_mark as usize;
             debug_assert!(mark_slice.len() > to_mark);
@@ -341,19 +353,33 @@ impl GraphCallList {
 }
 
 impl Graph {
-    pub fn handle_md_events(&mut self, events: &MarketEventBlock, time: u128) {}
-    pub fn trigger_book(&mut self, security: SecurityIndex, time: u128) {
-        println!("written_bits: {:?}", self.mem.mark_as_written);
+    pub fn trigger_book<F: Fn(u128, &GraphInnerMem)>(
+        &mut self,
+        security: SecurityIndex,
+        events: &SmallVec<MarketEvent>,
+        time: u128,
+        fnc: F,
+    ) {
+        {
+            let mut book = self.mem.books.get(security).borrow_mut();
+            for event in events {
+                book.handle_book_event(event);
+            }
+        }
         if let Some(calls) = self.book_updates.get_mut(security) {
             calls.trigger(time, &self.mem);
+            fnc(time, &self.mem);
+            calls.cleanup(time, &self.mem);
         }
     }
 
-    // TODO make safe
-    pub fn signal_listener(&self, signal: &str, output: &str) -> Option<ConsumerInput> {
+    pub fn signal_listener(&self, signal: &str, output: &str) -> Option<ConsumerWatcher> {
         self.mem
             .signal_output_to_index
             .get(&(signal.to_string(), output.to_string()))
-            .map(|ind| ConsumerInput { which: *ind })
+            .map(|ind| ConsumerWatcher {
+                inner: ConsumerInput { which: *ind },
+                graph: self.mem.clone(),
+            })
     }
 }

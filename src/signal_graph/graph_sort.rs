@@ -156,10 +156,15 @@ pub(crate) fn generate_calls_for(
     // now generate list of actual calls
 
     let mut calls = Vec::new();
+    let mut cleanup = Vec::new();
 
     for signal in sorted {
         let index = mem
             .signal_name_to_index
+            .get(&signal)
+            .expect("signal name missing late");
+        let inst = mem
+            .signal_name_to_instance
             .get(&signal)
             .expect("signal name missing late");
         let object = &mem.objects[*index as usize];
@@ -169,10 +174,14 @@ pub(crate) fn generate_calls_for(
         // overlapping references
         let object_ptr = unsafe { object as *const _ as *mut _ };
         calls.push(object_ptr);
+        if inst.definition.cleanup {
+            cleanup.push(object_ptr);
+        }
     }
 
     Ok(GraphCallList {
         calls,
+        cleanup,
         mark_as_clean,
         mem,
     })

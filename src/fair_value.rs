@@ -2,45 +2,65 @@ use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 use crate::signal_graph::graph_registrar::*;
 use crate::signal_graph::interface_types::*;
 
-#[derive(Default)]
-pub struct FairValueResult {
-    pub fair_price: f64,
-    pub fair_shares: f64,
-}
+use std::collections::{HashMap, HashSet};
 
 fn cents_to_dollars(cents: usize) -> f64 {
     (cents as f64) * 0.01
 }
 
-#[derive(Copy, Clone)]
 pub struct FairValue {
-    denom: f64,
-    offset: f64,
+    fair_out: ConsumerOutput,
+    size_out: ConsumerOutput,
+    book: BookViewer,
+    score_denom: f64,
+    score_offset: f64,
     dollars_out: f64,
     levels_out: usize,
 }
 
-pub struct FairValueSignal {
-    fair: FairValue,
-    fair_out: ConsumerOutput,
-    size_out: ConsumerOutput,
-    book: BookViewer,
+#[derive(serde::Deserialize)]
+struct FairParameters {
+    score_denom: f64,
+    score_offset: f64,
+    dollars_out: f64,
+    levels_out: usize,
 }
 
-impl CallSignal for FairValueSignal {
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
-        let book = self.book_viewer.book();
-        match book.bbo {
-            (Some((bid)), Some((ask))) => {
-                let fair = self.fair.fair_value(book.bids(), book.asks());
-                self.fair_out.set(fair.fair_price);
-                self.size_out.set(fair.fair_shares);
-            },
-            _ => {
-                self.fair_out.mark_invalid();
-                self.size_out.mark_invalid();
-            },
+impl RegisterSignal for FairValue {
+    type Child = Self;
+    fn get_inputs() -> HashMap<&'static str, SignalType> {
+        maplit::hashmap! {
+            "book" => SignalType::Book,
         }
+    }
+
+    fn get_outputs() -> HashSet<&'static str> {
+        maplit::hashset! {
+            "fair",
+            "size",
+        }
+    }
+
+    fn create(
+        mut outputs: HashMap<&'static str, ConsumerOutput>,
+        mut inputs: InputLoader,
+        json: Option<&str>,
+    ) -> Result<Self, anyhow::Error> {
+        let FairParameters {
+            score_denom,
+            score_offset,
+            dollars_out,
+            levels_out,
+        } = serde_json::from_str(json.unwrap())?;
+        Ok(FairValue {
+            score_denom,
+            score_offset,
+            dollars_out,
+            levels_out,
+            book: inputs.load_input("book")?,
+            fair_out: outputs.remove("fair").unwrap(),
+            size_out: outputs.remove("size").unwrap(),
+        })
     }
 }
 
@@ -50,21 +70,8 @@ impl CallSignal for FairValueSignal {
  * * use resulting values to calculate weighted midpoint
  */
 impl FairValue {
-    pub fn new(denom: f64, offset: f64, dollars_out: f64, levels_out: usize) -> FairValue {
-        assert!(denom > 0.0);
-        assert!(offset >= 0.0);
-        assert!(dollars_out > 0.0);
-        assert!(levels_out > 0);
-        FairValue {
-            denom,
-            offset,
-            dollars_out,
-            levels_out,
-        }
-    }
-
     fn score(&self, distance: f64) -> f64 {
-        self.offset + 1.0 / (1.0 + self.denom * distance * distance)
+        self.score_offset + 1.0 / (1.0 + self.score_denom * distance * distance)
     }
 
     fn score_distanced<I>(&self, prices: I) -> (f64, f64)
@@ -80,19 +87,27 @@ impl FairValue {
                 (sum_prc + prc * shares_score, sum_shares + shares_score)
             })
     }
+}
 
-    pub fn fair_value<'a, IB, IS>(&self, bids: IB, asks: IS, bbo: (usize, usize)) -> FairValueResult
-    where
-        IB: Iterator<Item = (&'a BuyPrice, &'a f64)>,
-        IS: Iterator<Item = (&'a SellPrice, &'a f64)>,
-    {
-        let (best_bid, best_ask) = bbo;
-        let best_bid = cents_to_dollars(best_bid);
-        let best_ask = cents_to_dollars(best_ask);
-        let bids = bids
+impl CallSignal for FairValue {
+    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+        let (best_bid, best_ask) = match self.book.book().bbo_price() {
+            (Some(best_bid), Some(best_ask)) => (best_bid, best_ask),
+            _ => {
+                self.fair_out.mark_invalid(graph);
+                self.size_out.mark_invalid(graph);
+                return;
+            }
+        };
+        let best_bid = best_bid as f64;
+        let best_ask = best_ask as f64;
+        let book = self.book.book();
+        let bids = book
+            .bids()
             .map(|(prc, sz)| (cents_to_dollars(prc.unsigned()), *sz))
             .map(|(prc, sz)| (prc, best_bid - prc, sz));
-        let asks = asks
+        let asks = book
+            .asks()
             .map(|(prc, sz)| (cents_to_dollars(prc.unsigned()), *sz))
             .map(|(prc, sz)| (prc, prc - best_ask, sz));
 
@@ -105,10 +120,10 @@ impl FairValue {
         let bid_price = bid_price / bid_shares;
         let ask_price = ask_price / ask_shares;
 
-        FairValueResult {
-            fair_price: (bid_price * ask_shares + ask_price * bid_shares)
-                / (ask_shares + bid_shares),
-            fair_shares: ask_shares + bid_shares,
-        }
+        let fair_price =
+            (bid_price * ask_shares + ask_price * bid_shares) / (ask_shares + bid_shares);
+        let fair_shares = ask_shares + bid_shares;
+        self.fair_out.set(fair_price, graph);
+        self.size_out.set(fair_shares, graph);
     }
 }

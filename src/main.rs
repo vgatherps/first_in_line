@@ -196,28 +196,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // all incoming messages
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         {
-            // and is part of the reset cycle
-            let position = position_manager::PositionManager::create(http.clone()).await;
-
-            let (
-                mut bitmex,
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                bybit_usdt,
-                bybit_inverse,
-                huobi,
-                coinbase,
-            ) = join!(
-                bitmex_connection(),
-                okex_connection(OkexType::Spot),
-                okex_connection(OkexType::Swap),
-                okex_connection(OkexType::Quarterly),
-                bybit_connection(BybitType::USDT),
-                bybit_connection(BybitType::Inverse),
-                huobi_connection(HuobiType::Spot),
-                coinbase_connection(),
-            );
+            let (md_sender, md_receiver) = bounded(5000);
+            let desired_indices: Vec<_> = securities
+                .iter()
+                .map(|s| sec_map.to_index(s).unwrap())
+                .collect();
+            let md_map = sec_map.clone();
+            let md_thread = std::thread::spawn(move || {
+                md_thread::start_md_thread(md_sender, desired_indices, md_map)
+            });
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
@@ -229,67 +216,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 event_queue.clone(),
             ));
 
-            let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
-            let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
-
-            let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
-                okex_spot,
-                okex_swap,
-                okex_quarterly,
-                bybit_usdt,
-                bybit_inverse,
-                huobi,
-                coinbase,
-                remote_fair_value,
-                0.001,
-            );
-
-            let mut local_book = local_book::LocalBook::new(local_fair_value);
-
-            let mut displacement = displacement::Displacement::new();
-
-            let mut tactic = tactic::Tactic::new(
-                args.profit_bps,
-                args.profit_bps_cancel,
-                args.fee_bps,
-                args.cost_of_position,
-                args.base_trade_contracts,
-                position,
-                &mut statistics,
-                http.clone(),
-                event_queue.clone(),
-            );
-
             loop {
                 if DIE.load(Ordering::Relaxed) {
                     panic!("Death variable set");
                 }
-                let event_type = select! {
-                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
-                    block = bitmex.next().fuse() => {
-                        TacticEventType::LocalBook(local_book.handle_book_update(&block.events))
-                    },
-                    event = event_reader.recv().fuse() => match event {
-                            Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
-                            Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
-                            Some(TacticInternalEvent::Trades(trades)) => TacticEventType::Trades(trades),
-                            Some(TacticInternalEvent::CancelStale(side, price, id)) => TacticEventType::CancelStale(side, price, id),
-                            Some(TacticInternalEvent::CheckGone(side, price, id)) => TacticEventType::CheckGone(side, price, id),
-                            Some(TacticInternalEvent::SetLateStatus(side, price, id)) => TacticEventType::SetLateStatus(side, price, id),
-                            Some(TacticInternalEvent::Reset(is_bad)) => {
-                                if is_bad {
-                                    bad_runs_count += 1;
-                                }
-                                TacticEventType::Reset
-                            },
-                            Some(TacticInternalEvent::Ping) => TacticEventType::Ping,
-                            None => panic!("event queue died"),
-                        },
+                let event_type = match md_receiver.try_recv() {
+                    Ok((index, data)) => None,
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => panic!("Market data disconnected"),
                 };
-                match &event_type {
-                    TacticEventType::RemoteFair => {
-                        if let Some((rf, rs)) = remote_agg.calculate_fair() {
-                            displacement.handle_remote(rf, rs);
+                let event_type = if let Some(event_type) = event_type {
+                    event_type
+                } else {
+                    match event_reader.try_recv() {
+                        Ok(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
+                        Ok(TacticInternalEvent::Reset(is_bad)) => {
+                            if is_bad {
+                                bad_runs_count += 1;
+                            }
+                            TacticEventType::Reset
                         }
                     }
                     TacticEventType::LocalBook(_) => {
@@ -321,48 +266,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         // Do a reset
                         break;
                     }
-                    TacticEventType::Ping => {
-                        let _ = join!(bitmex.ping(), remote_agg.ping());
-                    }
-                    TacticEventType::WriteHtml => (),
-                }
-                if let (
-                    Some((_, (local_fair, local_size))),
-                    Some((displacement_val, expected_premium)),
-                    Some((remote_fair, remote_size)),
-                ) = (
-                    local_book.get_local_tob(),
-                    displacement.get_displacement(),
-                    remote_agg.calculate_fair(),
-                ) {
-                    let premium = local_fair - remote_fair;
-                    // again, discount the displacement by size weighting.
-                    // I really need to centralize these "forecasts"
-
-                    let total_size = local_size + remote_size;
-                    let remote_adjust = remote_size / total_size;
-                    let local_adjust = local_size / total_size;
-
-                    let desired_premium = premium * local_adjust + expected_premium * remote_adjust;
-
-                    match &event_type {
-                        TacticEventType::RemoteFair => tactic.handle_book_update(
-                            local_book.book(),
-                            &SmallVec::new(),
-                            local_fair,
-                            displacement_val,
-                            desired_premium,
-                        ),
-                        TacticEventType::LocalBook(inside_orders) => tactic.handle_book_update(
-                            local_book.book(),
-                            &inside_orders,
-                            local_fair,
-                            displacement_val,
-                            desired_premium,
-                        ),
-                        TacticEventType::WriteHtml => {
-                            let html = format!(
-                                "
+                    TacticEventType::WriteHtml => {
+                        let html = format!(
+                            "
                         <!DOCYPE html>
                         <html>
                         <head>
@@ -373,35 +279,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         <body>
                         <h4>Going Since {start} </h4>
                         <h4>Last Update {now} </h4>
-                        {tactic}
-                        {local}
-                        {remote}
-                        {displacement}
-                        {http}
                         </body>
                         </html>
                         ",
-                                start = start,
-                                now = Local::now(),
-                                tactic = tactic.get_html_info(local_fair),
-                                local = local_book.get_html_info(),
-                                remote = remote_agg.get_html_info(),
-                                displacement = displacement.get_html_info(),
-                                http = http.get_html_info(),
-                            );
-                            html_queue.send(html).expect("Couldn't send html");
-                        }
-
-                        // Already handled
-                        TacticEventType::AckCancel(_)
-                        | TacticEventType::SetLateStatus(_, _, _)
-                        | TacticEventType::CancelStale(_, _, _)
-                        | TacticEventType::CheckGone(_, _, _)
-                        | TacticEventType::Reset
-                        | TacticEventType::Ping
-                        | TacticEventType::Trades(_) => (),
-                    };
-                }
+                            start = start,
+                            now = Local::now(),
+                        );
+                        html_queue.send(html).expect("Couldn't send html");
+                    }
+                    TacticEventType::None => tokio::task::yield_now().await,
+                };
             }
         }
 
