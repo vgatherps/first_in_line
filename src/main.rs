@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::{HashMap, HashSet};
 
 mod args;
-mod bitmex_http;
+mod central_registry;
 mod displacement;
 mod ema;
 mod exchange;

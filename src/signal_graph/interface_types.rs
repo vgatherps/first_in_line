@@ -88,7 +88,11 @@ impl ConsumerInput {
     }
 
     #[inline]
-    pub fn and_out(&self, other: &ConsumerOutput, graph: &GraphInnerMem) -> AndConsumers<(f64, f64)> {
+    pub fn and_out(
+        &self,
+        other: &ConsumerOutput,
+        graph: &GraphInnerMem,
+    ) -> AndConsumers<(f64, f64)> {
         self.and(&other.inner, graph)
     }
 }

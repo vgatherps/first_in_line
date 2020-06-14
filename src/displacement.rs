@@ -18,8 +18,13 @@ pub struct Premium {
 
 impl CallSignal for Premium {
     fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
-        self.diff
-            .set_from(self.in1.and(&self.in2, graph).get().map(|(in1, in2)| in1 - in2), graph);
+        self.diff.set_from(
+            self.in1
+                .and(&self.in2, graph)
+                .get()
+                .map(|(in1, in2)| in1 - in2),
+            graph,
+        );
     }
 }
 

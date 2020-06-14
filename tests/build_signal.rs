@@ -47,7 +47,7 @@ impl RegisterSignal for DummyBookSignal {
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
         _: InputLoader,
-        json: Option<&str>
+        json: Option<&str>,
     ) -> Result<DummyBookSignal, anyhow::Error> {
         assert_eq!(json, None);
         Ok(DummyBookSignal {
@@ -70,7 +70,7 @@ impl RegisterSignal for DummyConsumerSignal {
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
         mut input: InputLoader,
-        json: Option<&str>
+        json: Option<&str>,
     ) -> Result<DummyConsumerSignal, anyhow::Error> {
         assert_eq!(json, None);
         Ok(DummyConsumerSignal {
@@ -144,7 +144,9 @@ fn construct_graph() {
         ),
     ];
 
-    let mut graph = registrar.generate_graph(&layout_vec, &sec_map, &HashMap::new()).unwrap();
+    let mut graph = registrar
+        .generate_graph(&layout_vec, &sec_map, &HashMap::new())
+        .unwrap();
 
     let book = graph.signal_listener("book", "out").unwrap();
     let consumer1 = graph.signal_listener("consumer1", "out").unwrap();

@@ -48,7 +48,7 @@ impl RegisterSignal for DummyBookSignal {
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
         _: InputLoader,
-        json: Option<&str>
+        json: Option<&str>,
     ) -> Result<DummyBookSignal, anyhow::Error> {
         assert_eq!(json, None);
         Ok(DummyBookSignal {
@@ -70,7 +70,7 @@ impl RegisterSignal for DummyConsumerSignal {
     fn create(
         mut outs: HashMap<&'static str, ConsumerOutput>,
         mut ins: InputLoader,
-        json: Option<&str>
+        json: Option<&str>,
     ) -> Result<DummyConsumerSignal, anyhow::Error> {
         assert_eq!(json, None);
         Ok(DummyConsumerSignal {
