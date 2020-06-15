@@ -114,66 +114,6 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
     }
 }
 
-async fn get_max_timestamp(
-    last_seen: Option<String>,
-    http: Arc<bitmex_http::BitmexHttp>,
-) -> (String, SmallVec<bitmex_http::Transaction>) {
-    let transactions = http
-        .request_transactions_from(last_seen.clone(), http.clone())
-        .await;
-    let last_seen_filter = if let Some(ls) = last_seen {
-        ls
-    } else {
-        String::new()
-    };
-    // We must reverse the transactions to go from oldest to newest
-    let transactions: SmallVec<_> = transactions
-        .into_iter()
-        .rev()
-        .filter(|t| t.timestamp > last_seen_filter)
-        .collect();
-    let last_seen = transactions
-        .iter()
-        .map(|t| t.timestamp.clone())
-        .max()
-        .unwrap_or(last_seen_filter);
-    (last_seen, transactions)
-}
-
-async fn transaction_loop(
-    mut last_seen: String,
-    http: Arc<bitmex_http::BitmexHttp>,
-    mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
-) {
-    let myloop = LOOP.load(Ordering::Relaxed);
-    let mut seen = HashSet::new();
-    let mut seen_qty = HashMap::new();
-    while myloop == LOOP.load(Ordering::Relaxed) {
-        tokio::time::delay_for(std::time::Duration::from_millis(1000 * 5)).await;
-        let (new_last_seen, transactions) =
-            get_max_timestamp(Some(last_seen.clone()), http.clone()).await;
-        last_seen = new_last_seen;
-        let mut transactions: SmallVec<_> = transactions
-            .into_iter()
-            .filter(|t| !seen.contains(&t.exec_id))
-            .collect();
-        for transaction in &mut transactions {
-            seen.insert(transaction.exec_id.clone());
-            let current_cum_qty = seen_qty.entry(transaction.order_id).or_insert(0usize);
-            assert!(*current_cum_qty <= transaction.cum_size);
-            transaction.size = transaction.cum_size - *current_cum_qty;
-            *current_cum_qty = transaction.cum_size;
-        }
-        if transactions.len() > 0 {
-            assert!(event_queue
-                .send(TacticInternalEvent::Trades(transactions))
-                .await
-                .is_ok());
-        }
-    }
-    println!("Exiting transaction loop");
-}
-
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();

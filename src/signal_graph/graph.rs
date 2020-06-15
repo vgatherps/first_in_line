@@ -243,7 +243,6 @@ impl GraphInnerMem {
                             });
                         }
                         let range_start = aggregate_offsets.len();
-                        print!("Signal {} aggregate:", signal_name);
                         for (parent, output) in parents {
                             let consumer = get_index_for(
                                 &signal_output_to_index,
@@ -252,7 +251,6 @@ impl GraphInnerMem {
                                 signal_name,
                                 name,
                             )?;
-                            print!(" ({}, {}):{}", parent, output, consumer);
                             aggregate_offsets.push(consumer);
                         }
                         let range_end = aggregate_offsets.len();
@@ -369,6 +367,11 @@ impl Graph {
                 book.handle_book_event(event);
             }
         }
+
+        // TODO benchmark the performance issues here - 
+        // Is it just since my laptop has no cores/weird scheduling?
+        // results are wayyyyy too expensive by any interpretation?
+        // even for empty calls takes ~1-2k cycles with high variance
         if let Some(calls) = self.book_updates.get_mut(security) {
             calls.trigger(time, &self.mem);
             fnc(time, &self.mem);
