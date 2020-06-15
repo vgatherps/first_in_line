@@ -51,6 +51,7 @@ pub enum NamedSignalType {
 }
 
 // TODO should be called instantiation, name already taken
+#[derive(Debug)]
 pub struct SignalCall {
     pub signal_name: String,
     pub inputs: HashMap<String, NamedSignalType>,

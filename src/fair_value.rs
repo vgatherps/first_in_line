@@ -99,8 +99,8 @@ impl CallSignal for FairValue {
                 return;
             }
         };
-        let best_bid = best_bid as f64;
-        let best_ask = best_ask as f64;
+        let best_bid = cents_to_dollars(best_bid);
+        let best_ask = cents_to_dollars(best_ask);
         let book = self.book.book();
         let bids = book
             .bids()

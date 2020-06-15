@@ -40,7 +40,7 @@ impl RegisterSignal for Premium {
 
     fn get_outputs() -> HashSet<&'static str> {
         maplit::hashset! {
-            "out"
+            "output"
         }
     }
 
@@ -52,7 +52,7 @@ impl RegisterSignal for Premium {
         Ok(Premium {
             in1: inputs.load_input("in1")?,
             in2: inputs.load_input("in2")?,
-            diff: outputs.remove("out").unwrap(),
+            diff: outputs.remove("output").unwrap(),
         })
     }
 }

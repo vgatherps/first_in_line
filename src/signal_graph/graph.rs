@@ -243,6 +243,7 @@ impl GraphInnerMem {
                             });
                         }
                         let range_start = aggregate_offsets.len();
+                        print!("Signal {} aggregate:", signal_name);
                         for (parent, output) in parents {
                             let consumer = get_index_for(
                                 &signal_output_to_index,
@@ -251,11 +252,13 @@ impl GraphInnerMem {
                                 signal_name,
                                 name,
                             )?;
+                            print!(" ({}, {}):{}", parent, output, consumer);
                             aggregate_offsets.push(consumer);
                         }
                         let range_end = aggregate_offsets.len();
-                        let aggregate_signal = AggregateInput {
+                        let aggregate_signal = AggregateInputGenerator {
                             offsets: (range_start as u16)..(range_end as u16),
+                            mapping: aggregate_offsets.clone(),
                         };
                         hooks.insert(*name, Box::new(aggregate_signal));
                     }
@@ -381,5 +384,18 @@ impl Graph {
                 inner: ConsumerInput { which: *ind },
                 graph: self.mem.clone(),
             })
+    }
+
+    pub fn load_outputs(&self) -> Vec<((String, String), Option<f64>)> {
+        self.mem
+            .signal_output_to_index
+            .iter()
+            .map(|((name, output), index)| {
+                (
+                    (name.clone(), output.clone()),
+                    ConsumerInput { which: *index }.get(&self.mem),
+                )
+            })
+            .collect()
     }
 }

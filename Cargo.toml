@@ -17,7 +17,6 @@ path = "src/reader.rs"
 [lib]
 name = "arby"
 path = "src/lib.rs"
-crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -44,6 +43,7 @@ bincode = "1.2.1"
 lazy_static = "1.4"
 dynstack = "0.4"
 thiserror = "1"
+crossbeam-channel = "0.4"
 maplit = "1"
 anyhow = "1"
 tuple = "0.4.2"

@@ -1,5 +1,3 @@
-#![recursion_limit = "512"]
-
 //WARNING
 //WARNING
 //
@@ -30,7 +28,7 @@ mod displacement;
 mod ema;
 mod exchange;
 mod fair_value;
-mod fifo_pnl;
+mod generate_signal;
 mod local_book;
 mod order_book;
 mod order_manager;
@@ -39,6 +37,12 @@ mod remote_venue_aggregator;
 mod tactic;
 
 use fair_value::*;
+
+use signal_graph::security_index::{Security, SecurityMap};
+
+use horrorshow::html;
+
+use signal_graph::graph_registrar::*;
 
 pub static DIE: AtomicBool = AtomicBool::new(false);
 pub static LOOP: AtomicUsize = AtomicUsize::new(0);
@@ -189,6 +193,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     drop(test_position);
 
     let mut bad_runs_count: usize = 0;
+    let registrar = central_registry::generate_registrar().unwrap();
+    let all_signals = generate_signal::generate_signal_list(&securities);
+    let inputs = generate_signal::generate_inputs(&securities);
     loop {
         // This is a little weird. We need to 'kill this', but actually dropping it poisons
         // the various events pushing into it. So instead, this lives outside the data loop scope,
@@ -196,6 +203,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // all incoming messages
         let (event_queue, mut event_reader) = tokio::sync::mpsc::channel(100);
         {
+            let mut signal_graph = registrar
+                .generate_graph(&all_signals[..], &sec_map, &inputs)
+                .unwrap();
             let (md_sender, md_receiver) = bounded(5000);
             let desired_indices: Vec<_> = securities
                 .iter()
@@ -221,7 +231,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     panic!("Death variable set");
                 }
                 let event_type = match md_receiver.try_recv() {
-                    Ok((index, data)) => None,
+                    Ok((index, data)) => {
+                        signal_graph.trigger_book(index, &data.events, 0, |_, _| ());
+                        None
+                    }
                     Err(TryRecvError::Empty) => None,
                     Err(TryRecvError::Disconnected) => panic!("Market data disconnected"),
                 };
@@ -267,6 +280,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     TacticEventType::WriteHtml => {
+                        let mut outputs = signal_graph.load_outputs();
+                        outputs.sort_by_key(|((name, out), _)| (out.clone(), name.clone()));
+                        let signal_output = format!(
+                            "{}",
+                            html! {
+                                html {
+                                    body {
+                                        h4(id="Signals", class="title");
+                                        ol(id="count") {
+                                            @ for ((name, output), val) in &outputs {
+                                                li(class="item") {
+                                                    : format!("({}, {}):{}",
+                                                    name,
+                                                    output,
+                                                    val.map(|v| format!("{:.2}", v)).unwrap_or("None".to_string()))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        );
                         let html = format!(
                             "
                         <!DOCYPE html>
@@ -279,11 +314,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         <body>
                         <h4>Going Since {start} </h4>
                         <h4>Last Update {now} </h4>
+                        {signals}
                         </body>
                         </html>
                         ",
                             start = start,
                             now = Local::now(),
+                            signals = signal_output
                         );
                         html_queue.send(html).expect("Couldn't send html");
                     }

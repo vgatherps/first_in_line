@@ -18,6 +18,7 @@ pub struct RemoteVenueAggregator {
 
 impl RegisterSignal for RemoteVenueAggregator {
     type Child = RemoteVenueAggregator;
+    const PARAMS: bool = false;
 
     fn get_inputs() -> HashMap<&'static str, SignalType> {
         maplit::hashmap! {
@@ -39,15 +40,12 @@ impl RegisterSignal for RemoteVenueAggregator {
         mut inputs: InputLoader,
         json: Option<&str>,
     ) -> Result<Self, anyhow::Error> {
-        let json = json.unwrap();
         let fairs: Vec<_> = inputs
-            .load_input::<AggregateInput>("fair_mids")?
-            .as_consumer_iter()
-            .collect();
+            .load_input::<AggregateInputGenerator>("fair_mids")?
+            .as_consumers();
         let sizes: Vec<_> = inputs
-            .load_input::<AggregateInput>("fair_sizes")?
-            .as_consumer_iter()
-            .collect();
+            .load_input::<AggregateInputGenerator>("fair_sizes")?
+            .as_consumers();
         assert_eq!(fairs.len(), sizes.len());
         Ok(RemoteVenueAggregator {
             fairs: fairs.into_iter().zip(sizes.into_iter()).collect(),

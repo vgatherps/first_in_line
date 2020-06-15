@@ -81,8 +81,8 @@ impl ConsumerInput {
     #[inline]
     pub fn and(&self, other: &ConsumerInput, graph: &GraphInnerMem) -> AndConsumers<(f64, f64)> {
         AndConsumers {
-            valid: get_raw_bit(self.which, &graph.mark_as_written)
-                & get_raw_bit(self.which, &graph.mark_as_written),
+            valid: get_raw_bit(self.which, &graph.mark_as_valid)
+                & get_raw_bit(other.which, &graph.mark_as_valid),
             vals: (self.get_cell(graph).get(), other.get_cell(graph).get()),
         }
     }
@@ -103,10 +103,10 @@ impl ConsumerInput {
 fn get_raw_bit(index: u16, slice: &[Cell<u64>]) -> u64 {
     let (offset, bit) = index_to_bitmap(index);
     let offset = offset as usize;
-    let get_mask = 1 << bit;
+    let get_mask = 1;
     debug_assert!(offset < slice.len());
     let mask = unsafe { slice.get_unchecked(offset) };
-    let mask = mask.get();
+    let mask = mask.get() >> bit;
     mask & get_mask
 }
 
@@ -204,12 +204,29 @@ impl ConsumerWatcher {
     }
 }
 
-impl AggregateInput {
-    #[inline]
-    pub fn as_consumer_iter(&self) -> impl Iterator<Item = ConsumerInput> {
-        self.offsets.clone().map(|o| ConsumerInput { which: o })
+pub struct AggregateInputGenerator {
+    pub(crate) mapping: Vec<u16>,
+    pub(crate) offsets: std::ops::Range<u16>,
+}
+
+impl AggregateInputGenerator {
+    pub fn as_consumers(&self) -> Vec<ConsumerInput> {
+        self.offsets
+            .clone()
+            .map(|o| ConsumerInput {
+                which: self.mapping[o as usize],
+            })
+            .collect()
     }
 
+    pub fn as_update(&self) -> AggregateInput {
+        AggregateInput {
+            offsets: self.offsets.clone(),
+        }
+    }
+}
+
+impl AggregateInput {
     #[inline]
     pub fn iter_changed<'a>(&self, graph: &'a GraphInnerMem) -> AggregateInputIter<'a> {
         // it's faster to create an aggregate mask as opposed to branching on each offset
@@ -293,13 +310,6 @@ impl<T: TupleNext + Copy> AndConsumers<T> {
     }
 }
 
-macro_rules! sealed {
-    ($type:ty, $trait:ty) => {
-        impl $trait for $type {}
-        impl private::Seal for $type {}
-    };
-}
-
 macro_rules! impl_combined_next {
     ($( $t:ty )*) => {
         impl private::Seal for ( $( $t ),* ) {}
@@ -329,5 +339,5 @@ impl InputType for BookViewer {}
 impl private::Seal for ConsumerInput {}
 impl InputType for ConsumerInput {}
 
-impl private::Seal for AggregateInput {}
-impl InputType for AggregateInput {}
+impl private::Seal for AggregateInputGenerator {}
+impl InputType for AggregateInputGenerator {}
