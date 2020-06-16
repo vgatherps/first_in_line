@@ -166,10 +166,10 @@ pub(crate) fn generate_calls_for(
         // when the actual objects are referenced out of the graph list.
         // This pointer is only dereferenced during the calls, and we won't have
         // overlapping references
-        let object_ptr = unsafe { object as *const _ as *mut _ };
-        calls.push(object_ptr);
-        if inst.definition.cleanup {
-            cleanup.push(object_ptr);
+        let object_ptr = unsafe { object as *const CallSignal as *mut CallSignal as *mut u8};
+        calls.push((inst.definition.caller, object_ptr));
+        if let Some(cleaner) = inst.definition.cleanup {
+            cleanup.push((cleaner, object_ptr));
         }
     }
 

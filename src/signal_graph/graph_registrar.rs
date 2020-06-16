@@ -27,7 +27,8 @@ pub struct SignalDefinition {
         name: &str,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> Result<u16, GraphError>,
-    pub(crate) cleanup: bool,
+    pub(crate) caller: fn(obj: *mut u8,time: u128, graph: &GraphInnerMem),
+    pub(crate) cleanup: Option<fn(obj: *mut u8,time: u128, graph: &GraphInnerMem)>,
 }
 
 #[derive(Clone)]
@@ -136,7 +137,7 @@ impl GraphRegistrar {
 
 pub trait CallSignal {
     fn call_signal(&mut self, time: u128, graph: &GraphInnerMem);
-    fn cleanup(&mut self, _: &GraphInnerMem) {
+    fn cleanup(&mut self, time: u128, _: &GraphInnerMem) {
         unimplemented!("Cleanup called for signal without implementation, check your registrations")
     }
 }
@@ -168,11 +169,22 @@ pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() ->
         Ok(index as u16)
     }
 
+    fn _call_signal<F: CallSignal>(data: *mut u8, time: u128, graph: &GraphInnerMem) {
+        let real_ref = unsafe { &mut *(data as *mut F) };
+        real_ref.call_signal(time, graph)
+    }
+
+    fn _cleanup_signal<F: CallSignal>(data: *mut u8, time: u128, graph: &GraphInnerMem) {
+        let real_ref = unsafe { &mut *(data as *mut F) };
+        real_ref.cleanup(time, graph)
+    }
+
     SignalDefinition {
         inputs: T::get_inputs(),
         outputs: T::get_outputs(),
         creator: _real_create::<T>,
-        cleanup: T::CLEANUP,
+        caller: _call_signal::<T>,
+        cleanup: if T::CLEANUP { Some(_cleanup_signal::<T>) } else { None },
     }
 }
 

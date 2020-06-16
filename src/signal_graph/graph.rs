@@ -36,8 +36,8 @@ pub struct GraphInnerMem {
 pub(crate) struct GraphCallList {
     // TODO pull out specific functions from vtable
     // not high importance, only worth doing after proper testing is in place
-    pub(crate) calls: Vec<*mut CallSignal>,
-    pub(crate) cleanup: Vec<*mut CallSignal>,
+    pub(crate) calls: Vec<(fn(*mut u8, u128, &GraphInnerMem), *mut u8)>,
+    pub(crate) cleanup: Vec<(fn(*mut u8, u128, &GraphInnerMem), *mut u8)>,
     pub(crate) mem: Rc<GraphInnerMem>,
     pub(crate) mark_as_clean: Vec<u16>,
 }
@@ -327,17 +327,16 @@ fn get_index_for(
 impl GraphCallList {
     // TODO check types
     fn trigger(&mut self, time: u128, graph: &GraphInnerMem) {
-        for call in self.calls.iter() {
-            let call = unsafe { &mut **call };
-            call.call_signal(time, graph);
+        for (call, ptr) in self.calls.iter() {
+            call(*ptr, time, graph)
         }
     }
 
     fn cleanup(&mut self, time: u128, graph: &GraphInnerMem) {
-        for call in self.cleanup.iter() {
-            let call = unsafe { &mut **call };
-            call.call_signal(time, graph);
+        for (call, ptr) in self.cleanup.iter() {
+            call(*ptr, time, graph)
         }
+
         let mark_slice = &self.mem.mark_bitmask[..];
         for to_mark in &self.mark_as_clean {
             let to_mark = *to_mark as usize;

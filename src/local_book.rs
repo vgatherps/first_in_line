@@ -31,7 +31,7 @@ impl CallSignal for BookImprovedSignal {
         }
     }
 
-    fn cleanup(&mut self, graph: &GraphHandle) {
+    fn cleanup(&mut self, _: u128, graph: &GraphHandle) {
         self.improved_bid_to.mark_invalid(graph);
         self.improved_ask_to.mark_invalid(graph);
     }
