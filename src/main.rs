@@ -114,6 +114,7 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
     }
 }
 
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();

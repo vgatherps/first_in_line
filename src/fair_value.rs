@@ -90,6 +90,10 @@ impl FairValue {
 }
 
 impl CallSignal for FairValue {
+    // TODO optimize this here, I suspect it allocates something somethere.
+    // Why is iterating over so few levels taking a full microsecond? It makes no sense.
+    // Btreemap should be optimal for this sort of behavior
+    // Way, Way, Way too slow. Maybe use front-biased book?
     fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
         let (best_bid, best_ask) = match self.book.book().bbo_price() {
             (Some(best_bid), Some(best_ask)) => (best_bid, best_ask),

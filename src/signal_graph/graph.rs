@@ -328,11 +328,12 @@ impl GraphCallList {
     // TODO check types
     fn trigger(&mut self, time: u128, graph: &GraphInnerMem) {
         for (call, ptr) in self.calls.iter() {
-            call(*ptr, time, graph)
+            call(*ptr, time, graph);
         }
     }
 
     fn cleanup(&mut self, time: u128, graph: &GraphInnerMem) {
+
         for (call, ptr) in self.cleanup.iter() {
             call(*ptr, time, graph)
         }
@@ -354,6 +355,7 @@ impl GraphCallList {
                 _mm_store_si128(real_addr, loaded);
             }
         }
+
     }
 }
 
