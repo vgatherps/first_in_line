@@ -4,7 +4,7 @@ use std::cell::UnsafeCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::graph::{index_to_bitmap, Graph, GraphCallList, GraphInnerMem};
+use super::graph::{Graph, GraphCallList, GraphInnerMem};
 use super::graph_error::GraphError;
 use super::graph_registrar::*;
 use super::security_data::SecurityVector;
@@ -139,8 +139,8 @@ pub(crate) fn generate_calls_for(
         .map(|((sig, _), index)| (sig, index))
         .filter(|(sig, _)| seen_signals.contains(*sig))
         .map(|(_, index)| {
-            let (offset, _) = index_to_bitmap(*index);
-            offset
+            // Reduce to the nearest 16 elements to mask off
+            index / 16
         })
         .collect();
 

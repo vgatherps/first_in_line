@@ -22,22 +22,15 @@ use dynstack::DynStack;
 // and not by arbitrary metadata
 pub struct GraphInnerMem {
     pub(crate) output_values: Vec<Cell<f64>>,
-    pub(crate) mark_as_written: Vec<Cell<u64>>,
-    pub(crate) mark_as_valid: Vec<Cell<u64>>,
+    // This could be compressed even more into a real bitmask,
+    // BUT this has significant code size and performance costs given how much it's called
+    pub(crate) mark_bitmask: Vec<Cell<u8>>,
     pub(crate) books: SecurityVector<Rc<RefCell<OrderBook>>>,
     pub(crate) signal_output_to_index: HashMap<(String, String), u16>,
     pub(crate) signal_name_to_index: HashMap<String, u16>,
     pub(crate) signal_name_to_instance: HashMap<String, SignalInstantiation>,
     pub(crate) aggregate_mapping_array: Vec<u16>,
     pub(crate) objects: DynStack<dyn CallSignal>,
-}
-
-// returns bitmap_offset
-#[inline(always)]
-pub(crate) fn index_to_bitmap(index: u16) -> (u16, u16) {
-    let offset = index / 64;
-    let bit = index % 64;
-    (offset, bit)
 }
 
 pub(crate) struct GraphCallList {
@@ -137,13 +130,15 @@ impl GraphInnerMem {
             .map(|_| Cell::new(0.0))
             .collect();
 
-        let bitmap_estimate = 1 + output_values.len() / 64;
-
-        let mark_as_written: Vec<_> = output_values
+        let mut mark_bitmask: Vec<_> = signal_output_to_index
             .iter()
             .map(|_| Cell::new(0))
-            .take(bitmap_estimate)
             .collect();
+
+        // REQUIRED! extra padding for bulk de-mask operations
+        for _ in 0..32 {
+            mark_bitmask.push(Cell::new(0));
+        }
 
         let books =
             SecurityVector::new_with(security_map, |_, _| Rc::new(RefCell::new(OrderBook::new())));
@@ -297,8 +292,7 @@ impl GraphInnerMem {
         let mut rval = Rc::new(GraphInnerMem {
             output_values,
             books,
-            mark_as_valid: mark_as_written.clone(),
-            mark_as_written,
+            mark_bitmask,
             signal_output_to_index,
             signal_name_to_index,
             signal_name_to_instance,
@@ -344,11 +338,22 @@ impl GraphCallList {
             let call = unsafe { &mut **call };
             call.call_signal(time, graph);
         }
-        let mark_slice = &self.mem.mark_as_written[..];
+        let mark_slice = &self.mem.mark_bitmask[..];
         for to_mark in &self.mark_as_clean {
             let to_mark = *to_mark as usize;
-            debug_assert!(mark_slice.len() > to_mark);
-            unsafe { mark_slice.get_unchecked(to_mark) }.set(0);
+            use std::arch::x86_64::*;
+            // This depends on Cell's transparent representation, if it's right
+            // this is compiled out, otherwise just compiles to a panic
+            assert_eq!(std::mem::size_of::<Cell<u8>>(), std::mem::size_of::<u8>());
+            debug_assert!(mark_slice.len() > (to_mark + 1) * 16);
+            let addr = mark_slice.as_ptr() as *mut __m128i;
+            unsafe {
+                let real_addr = addr.add(to_mark);
+                let block_mask = _mm_set1_epi8(!1);
+                let loaded = _mm_loadu_si128(real_addr);
+                let loaded = _mm_and_si128(block_mask, loaded);
+                _mm_store_si128(real_addr, loaded);
+            }
         }
     }
 }
