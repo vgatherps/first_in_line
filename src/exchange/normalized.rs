@@ -42,15 +42,6 @@ impl Side {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct OrderUpdate {
-    pub cents: usize,
-    pub size: f64,
-    pub order_id: usize,
-    pub side: Side,
-    pub exchange_time: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct BookUpdate {
     pub cents: usize,
     pub side: Side,
@@ -58,17 +49,51 @@ pub struct BookUpdate {
     pub exchange_time: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum MarketEvent {
-    Book(BookUpdate),
-    OrderUpdate(OrderUpdate),
-    Clear,
+impl Hash for BookUpdate {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.cents.hash(hasher);
+        self.side.hash(hasher);
+        self.exchange_time.hash(hasher);
+        let int_size = (self.size * 100.0).round() as u64;
+        int_size.hash(hasher);
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Hash)]
+pub enum MarketUpdates {
+    Book(SmallVec<BookUpdate>),
+    Reset(SmallVec<BookUpdate>),
+}
+
+#[repr(C)]
+pub enum MarketDataTag {
+    Book,
+    Trade,
+    Fill,
+}
+
+pub type MarketDataTagArr<T> = [T; 1 + MarketDataTag::Fill as usize];
+
+impl MarketUpdates {
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            MarketUpdates::Book(ev) | MarketUpdates::Reset(ev) => ev.len(),
+        }
+    }
+
+    #[inline]
+    pub fn to_tag(&self) -> MarketDataTag {
+        match self {
+            MarketUpdates::Book(_) | MarketUpdates::Reset(_) => MarketDataTag::Book,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MarketEventBlock {
     pub exchange: Exchange,
-    pub events: SmallVec<MarketEvent>,
+    pub events: MarketUpdates,
 }
 
 pub struct MarketDataStream {
@@ -112,8 +137,9 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
 }
 
 pub enum DataOrResponse {
-    Data(SmallVec<MarketEvent>),
+    Data(MarketUpdates),
     Response(Message),
+    Skip,
 }
 
 impl MarketDataStream {
@@ -151,6 +177,7 @@ impl MarketDataStream {
                                 self.stream.send(msg).await.unwrap();
                                 continue;
                             }
+                            DataOrResponse::Skip => continue,
                             DataOrResponse::Data(events) => events,
                         };
                         if events.len() > 0 {

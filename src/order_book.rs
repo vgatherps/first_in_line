@@ -2,13 +2,6 @@ use std::collections::BTreeMap;
 
 use crate::exchange::normalized::*;
 
-// TODO abstract out into various book events
-#[derive(Debug)]
-pub struct BBOClearEvent {
-    pub side: Side,
-    pub price: usize,
-}
-
 #[derive(Ord, PartialOrd, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BuyPrice {
     value: i64,
@@ -109,7 +102,7 @@ impl OrderBook {
 
     // TODO some exchanges (okex) send removes for nonexistent levels.
     // I should understand why and where that happens
-    fn delete_level(&mut self, price: usize, side: Side) -> Option<BBOClearEvent> {
+    fn delete_level(&mut self, price: usize, side: Side) {
         let (best_bid, best_ask) = self.bbo();
         let (test_price, test_side) = match side {
             Side::Buy => {
@@ -123,37 +116,28 @@ impl OrderBook {
                 (best_ask, Side::Sell)
             }
         };
-        match test_price {
-            Some((test_price, _)) if test_price == price => Some(BBOClearEvent {
-                side: test_side,
-                price: test_price,
-            }),
-            _ => None,
+    }
+
+    fn handle_book_event(&mut self, event: &BookUpdate) {
+        self.last_update = event.exchange_time;
+        if event.size <= 0.000001 {
+            self.delete_level(event.cents, event.side)
+        } else {
+            self.update_level(event.cents, event.side, event.size)
         }
     }
 
-    pub fn handle_book_event(&mut self, event: &MarketEvent) -> Option<BBOClearEvent> {
-        match event {
-            MarketEvent::Book(BookUpdate {
-                cents,
-                side,
-                size,
-                exchange_time,
-            }) => {
-                self.last_update = *exchange_time;
-                if *size <= 0.000001 {
-                    self.delete_level(*cents, *side)
-                } else {
-                    self.update_level(*cents, *side, *size);
-                    None
+    pub fn handle_updates(&mut self, updates: &MarketUpdates) {
+        match updates {
+            MarketUpdates::Reset(_) => *self = OrderBook::new(),
+            _ => (),
+        };
+        match updates {
+            MarketUpdates::Book(data) | MarketUpdates::Reset(data) => {
+                for event in data {
+                    self.handle_book_event(event);
                 }
             }
-            MarketEvent::Clear => {
-                self.bids.clear();
-                self.asks.clear();
-                None
-            }
-            _ => panic!("This book is not expected to consume non book update events"),
         }
     }
 

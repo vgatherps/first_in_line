@@ -1,6 +1,6 @@
 use crate::exchange::{
     normalized,
-    normalized::{DataOrResponse, SmallVec},
+    normalized::{DataOrResponse, MarketUpdates, SmallVec},
 };
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
@@ -117,65 +117,68 @@ fn convert_inner(data: Message, which: BybitType) -> DataOrResponse {
         data => panic!("Incorrect message type {:?}", data),
     };
     if data.contains("success") {
-        return DataOrResponse::Data(SmallVec::new());
+        return DataOrResponse::Skip;
     }
 
     DataOrResponse::Data(if let Ok(message) = serde_json::from_str(&data) {
         match &message {
             BookUpdate::Snapshot(SnapshotInner { order_book }) => {
-                let mut result = SmallVec::new();
-                result.push(normalized::MarketEvent::Clear);
-                order_book.iter().for_each(|Update { price, size, side }| {
-                    let price: f64 = price.parse::<f64>().expect("Bad floating point");
-                    let size: f64 = *size;
-                    result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
-                        cents: price_to_cents(price),
-                        size: which.price_size_dollars(price, size),
-                        exchange_time: 0,
-                        side: *side,
-                    }))
-                });
-                result
+                let result = order_book
+                    .iter()
+                    .map(|Update { price, size, side }| {
+                        let price: f64 = price.parse::<f64>().expect("Bad floating point");
+                        let size: f64 = *size;
+                        normalized::BookUpdate {
+                            cents: price_to_cents(price),
+                            size: which.price_size_dollars(price, size),
+                            exchange_time: 0,
+                            side: *side,
+                        }
+                    })
+                    .collect();
+                MarketUpdates::Reset(result)
             }
             BookUpdate::Delta(Delta {
                 delete,
                 update,
                 insert,
-            }) => delete
-                .iter()
-                .chain(update.iter())
-                .chain(insert.iter())
-                .map(|Update { price, size, side }| {
-                    let price: f64 = price.parse::<f64>().expect("Bad floating point");
-                    let size: f64 = *size;
-                    normalized::MarketEvent::Book(normalized::BookUpdate {
-                        cents: price_to_cents(price),
-                        size: which.price_size_dollars(price, size),
-                        exchange_time: 0,
-                        side: *side,
+            }) => {
+                let result = delete
+                    .iter()
+                    .chain(update.iter())
+                    .chain(insert.iter())
+                    .map(|Update { price, size, side }| {
+                        let price: f64 = price.parse::<f64>().expect("Bad floating point");
+                        let size: f64 = *size;
+                        normalized::BookUpdate {
+                            cents: price_to_cents(price),
+                            size: which.price_size_dollars(price, size),
+                            exchange_time: 0,
+                            side: *side,
+                        }
                     })
-                })
-                .collect(),
+                    .collect();
+                MarketUpdates::Book(result)
+            }
         }
     } else {
         let futures_snapshot: FuturesSnapshot =
             serde_json::from_str(&data).expect("Couldn't parse json at all");
         // TODO less copy and paste
-        let mut result = SmallVec::new();
-        result.push(normalized::MarketEvent::Clear);
-        futures_snapshot
+        let result = futures_snapshot
             .data
             .iter()
-            .for_each(|Update { price, size, side }| {
+            .map(|Update { price, size, side }| {
                 let price: f64 = price.parse::<f64>().expect("Bad floating point");
                 let size: f64 = *size;
-                result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+                normalized::BookUpdate {
                     cents: price_to_cents(price),
                     size: which.price_size_dollars(price, size),
                     exchange_time: 0,
                     side: *side,
-                }))
-            });
-        result
+                }
+            })
+            .collect();
+        MarketUpdates::Reset(result)
     })
 }

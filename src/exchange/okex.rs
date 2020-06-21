@@ -1,7 +1,8 @@
 use crate::exchange::{
     normalized,
-    normalized::{DataOrResponse, SmallVec},
+    normalized::{DataOrResponse, MarketUpdates, SmallVec},
 };
+
 type SmallString = smallstr::SmallString<[u8; 64]>;
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
@@ -109,7 +110,7 @@ fn convert_future(data: Message) -> DataOrResponse {
     DataOrResponse::Data(convert_inner(data, OkexType::Quarterly))
 }
 
-fn convert_inner(data: Message, which: OkexType) -> SmallVec<normalized::MarketEvent> {
+fn convert_inner(data: Message, which: OkexType) -> MarketUpdates {
     let data = match data {
         Message::Binary(data) => {
             let mut deflater = DeflateDecoder::new(&data[..]);
@@ -122,35 +123,34 @@ fn convert_inner(data: Message, which: OkexType) -> SmallVec<normalized::MarketE
         data => panic!("Incorrect message type {:?}", data),
     };
     let message = serde_json::from_str(&data).expect("Couldn't parse okex message");
-    let (mut result, ups) = match &message {
-        BookUpdate::Partial([ups]) => {
-            let mut small = SmallVec::new();
-            small.push(normalized::MarketEvent::Clear);
-            (small, ups)
-        }
-        BookUpdate::Update([ups]) => (SmallVec::new(), ups),
+    let mut result = SmallVec::new();
+    let ups = match &message {
+        BookUpdate::Partial([ups]) | BookUpdate::Update([ups]) => ups,
     };
 
     ups.bids.iter().for_each(|[price, size, _, _]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+        result.push(normalized::BookUpdate {
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Buy,
             exchange_time: 0,
-        }))
+        })
     });
     ups.asks.iter().for_each(|[price, size, _, _]| {
         let price: f64 = price.parse::<f64>().expect("Bad floating point");
         let size: f64 = size.parse::<f64>().expect("Bad floating point");
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+        result.push(normalized::BookUpdate {
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Sell,
             exchange_time: 0,
-        }))
+        })
     });
 
-    result
+    match &message {
+        BookUpdate::Partial(_) => MarketUpdates::Reset(result),
+        BookUpdate::Update(_) => MarketUpdates::Book(result),
+    }
 }

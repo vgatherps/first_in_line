@@ -158,7 +158,11 @@ impl ConsumerOutput {
     pub fn set_from(&mut self, value: Option<f64>, graph: &GraphInnerMem) {
         if let Some(value) = value {
             self.inner.get_cell(graph).set(value);
-            mark_slice(self.inner.which, VALID_MASK | WRITTEN_MASK, &graph.mark_bitmask);
+            mark_slice(
+                self.inner.which,
+                VALID_MASK | WRITTEN_MASK,
+                &graph.mark_bitmask,
+            );
         } else {
             self.mark_invalid(graph)
         }
@@ -169,7 +173,11 @@ impl ConsumerOutput {
         // This could be made more efficient (branchless) with some bit/shifting tricks,
         // but I don't think this is a super high-value call
         if !self.is_valid(graph) {
-            mark_slice(self.inner.which, VALID_MASK | WRITTEN_MASK, &graph.mark_bitmask);
+            mark_slice(
+                self.inner.which,
+                VALID_MASK | WRITTEN_MASK,
+                &graph.mark_bitmask,
+            );
         }
     }
 
@@ -178,7 +186,11 @@ impl ConsumerOutput {
         // This could be made more efficient (branchless) with some bit/shifting tricks,
         // but I don't think this is a super high-value call
         if self.is_valid(graph) {
-            clear_slice(self.inner.which, VALID_MASK | WRITTEN_MASK, &graph.mark_bitmask);
+            clear_slice(
+                self.inner.which,
+                VALID_MASK | WRITTEN_MASK,
+                &graph.mark_bitmask,
+            );
         }
     }
 }

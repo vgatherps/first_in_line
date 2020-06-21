@@ -1,6 +1,6 @@
 use crate::exchange::{
     normalized,
-    normalized::{DataOrResponse, SmallVec},
+    normalized::{DataOrResponse, MarketUpdates, SmallVec},
 };
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
@@ -52,33 +52,28 @@ fn convert(data: Message) -> DataOrResponse {
     };
     use BookUpdate::*;
     let data = serde_json::from_str(&data).expect("Couldn't parse bitmex message");
-    let mut events: SmallVec<_> = match &data {
+    let events: SmallVec<_> = match &data {
         Partial(ups) | Insert(ups) | Update(ups) => ups
             .iter()
-            .map(|update| {
-                normalized::MarketEvent::Book(normalized::BookUpdate {
-                    cents: cents_from_id(update.id),
-                    side: update.side,
-                    size: update.size as f64,
-                    exchange_time: 0,
-                })
+            .map(|update| normalized::BookUpdate {
+                cents: cents_from_id(update.id),
+                side: update.side,
+                size: update.size as f64,
+                exchange_time: 0,
             })
             .collect(),
         Delete(ups) => ups
             .iter()
-            .map(|update| {
-                normalized::MarketEvent::Book(normalized::BookUpdate {
-                    cents: cents_from_id(update.id),
-                    side: update.side,
-                    size: 0.0,
-                    exchange_time: 0,
-                })
+            .map(|update| normalized::BookUpdate {
+                cents: cents_from_id(update.id),
+                side: update.side,
+                size: 0.0,
+                exchange_time: 0,
             })
             .collect(),
     };
-    match &data {
-        Partial(_) => events.insert(0, normalized::MarketEvent::Clear),
-        _ => (),
-    };
-    DataOrResponse::Data(events)
+    DataOrResponse::Data(match &data {
+        Partial(_) => MarketUpdates::Reset(events),
+        _ => MarketUpdates::Book(events),
+    })
 }

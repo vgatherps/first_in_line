@@ -1,6 +1,6 @@
 use crate::exchange::{
     normalized,
-    normalized::{DataOrResponse, SmallVec},
+    normalized::{DataOrResponse, MarketUpdates, SmallVec},
 };
 
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
@@ -134,29 +134,28 @@ fn convert_inner(data: Message, which: HuobiType) -> DataOrResponse {
             let pong = data.replace("ping", "pong");
             return DataOrResponse::Response(Message::Text(pong));
         } else {
-            return DataOrResponse::Data(SmallVec::new());
+            return DataOrResponse::Skip;
         }
     }
     let message: UpdateWrapper = serde_json::from_str(&data).expect("Couldn't parse huobi message");
     let mut result = SmallVec::new();
-    result.push(normalized::MarketEvent::Clear);
 
     message.tick.bids.into_iter().for_each(|[price, size]| {
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+        result.push(normalized::BookUpdate {
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Buy,
             exchange_time: 0,
-        }))
+        })
     });
     message.tick.asks.into_iter().for_each(|[price, size]| {
-        result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+        result.push(normalized::BookUpdate {
             cents: price_to_cents(price),
             size: which.convert_dollars(price, size),
             side: normalized::Side::Sell,
             exchange_time: 0,
-        }))
+        })
     });
 
-    DataOrResponse::Data(result)
+    DataOrResponse::Data(MarketUpdates::Reset(result))
 }

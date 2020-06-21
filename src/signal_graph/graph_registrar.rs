@@ -27,8 +27,8 @@ pub struct SignalDefinition {
         name: &str,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> Result<u16, GraphError>,
-    pub(crate) caller: fn(obj: *mut u8,time: u128, graph: &GraphInnerMem),
-    pub(crate) cleanup: Option<fn(obj: *mut u8,time: u128, graph: &GraphInnerMem)>,
+    pub(crate) caller: fn(obj: *mut u8, time: u128, graph: &GraphInnerMem),
+    pub(crate) cleanup: Option<fn(obj: *mut u8, time: u128, graph: &GraphInnerMem)>,
 }
 
 #[derive(Clone)]
@@ -184,7 +184,11 @@ pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() ->
         outputs: T::get_outputs(),
         creator: _real_create::<T>,
         caller: _call_signal::<T>,
-        cleanup: if T::CLEANUP { Some(_cleanup_signal::<T>) } else { None },
+        cleanup: if T::CLEANUP {
+            Some(_cleanup_signal::<T>)
+        } else {
+            None
+        },
     }
 }
 

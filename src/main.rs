@@ -114,15 +114,22 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
     }
 }
 
-
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let start = Local::now();
     let args = args::Arguments::from_args();
     let (html_queue, html_reader) = std::sync::mpsc::channel();
+    let securities = [
+        Security::new("bitmex", "BTCMEX"),
+        Security::new("okex", "BTC_PERP_OK"),
+        Security::new("okex", "BTC"),
+        Security::new("okex", "BTC_QUARTERLY"),
+        Security::new("bybit", "USDT"),
+        Security::new("bybit", "Inverse"),
+        Security::new("huobi", "BTC_PERP_HB"),
+        Security::new("gdax", "BTC"),
+    ];
 
-    //http state lives outside of the loop to properly rate-limit requests
-    let http = bitmex_http::BitmexHttp::new(args.auth_key, args.auth_secret);
-    let http = Arc::new(http);
+    let sec_map = SecurityMap::create(&securities);
 
     let html = args.html.clone();
     std::thread::spawn(move || html_writer(html, html_reader));

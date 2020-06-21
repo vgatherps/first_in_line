@@ -1,6 +1,7 @@
 use crate::exchange::normalized;
 use crate::exchange::{
     bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
+    ftx_connection,
     BybitType, HuobiType, OkexType,
 };
 
@@ -35,6 +36,7 @@ pub async fn reader_from_security(
         ("bybit", "Inverse") => Ok(bybit_connection(BybitType::Inverse).await),
         ("huobi", "BTC_PERP_HB") => Ok(huobi_connection(HuobiType::Spot).await),
         ("gdax", "BTC") => Ok(coinbase_connection().await),
+        ("ftx", "BTC_PERP_FTX") => Ok(ftx_connection().await),
         _ => Err(sec),
     }?;
 

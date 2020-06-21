@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 
-use crate::exchange::normalized::{MarketEvent, SmallVec};
+use crate::exchange::normalized::MarketUpdates;
 
 use crate::order_book::OrderBook;
 
@@ -333,7 +333,6 @@ impl GraphCallList {
     }
 
     fn cleanup(&mut self, time: u128, graph: &GraphInnerMem) {
-
         for (call, ptr) in self.cleanup.iter() {
             call(*ptr, time, graph)
         }
@@ -355,7 +354,6 @@ impl GraphCallList {
                 _mm_store_si128(real_addr, loaded);
             }
         }
-
     }
 }
 
@@ -363,18 +361,16 @@ impl Graph {
     pub fn trigger_book<F: Fn(u128, &GraphInnerMem)>(
         &mut self,
         security: SecurityIndex,
-        events: &SmallVec<MarketEvent>,
+        events: &MarketUpdates,
         time: u128,
         fnc: F,
     ) {
         {
             let mut book = self.mem.books.get(security).borrow_mut();
-            for event in events {
-                book.handle_book_event(event);
-            }
+            book.handle_updates(events);
         }
 
-        // TODO benchmark the performance issues here - 
+        // TODO benchmark the performance issues here -
         // Is it just since my laptop has no cores/weird scheduling?
         // results are wayyyyy too expensive by any interpretation?
         // even for empty calls takes ~1-2k cycles with high variance

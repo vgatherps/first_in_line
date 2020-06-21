@@ -1,6 +1,6 @@
 use crate::exchange::{
     normalized,
-    normalized::{DataOrResponse, SmallVec},
+    normalized::{DataOrResponse, MarketUpdates, SmallVec},
 };
 use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
@@ -80,42 +80,44 @@ fn convert(data: Message) -> DataOrResponse {
     DataOrResponse::Data(match &message {
         BookUpdate::Snapshot(ups) => {
             let mut result = SmallVec::new();
-            result.push(normalized::MarketEvent::Clear);
             ups.bids.iter().for_each(|[price, size]| {
                 let price: f64 = price.parse::<f64>().expect("Bad floating point");
                 let size: f64 = size.parse::<f64>().expect("Bad floating point");
-                result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+                result.push(normalized::BookUpdate {
                     cents: price_to_cents(price),
                     side: normalized::Side::Buy,
                     size: price * size,
                     exchange_time: 0,
-                }))
+                })
             });
             ups.asks.iter().for_each(|[price, size]| {
                 let price: f64 = price.parse::<f64>().expect("Bad floating point");
                 let size: f64 = size.parse::<f64>().expect("Bad floating point");
-                result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+                result.push(normalized::BookUpdate {
                     cents: price_to_cents(price),
                     side: normalized::Side::Sell,
                     size: price * size,
                     exchange_time: 0,
-                }))
-            });
-            result
-        }
-        BookUpdate::L2Update(L2Update { changes }) => changes
-            .iter()
-            .map(|(side, price, size)| {
-                let price: f64 = price.parse::<f64>().expect("Bad floating point");
-                let size: f64 = size.parse::<f64>().expect("Bad floating point");
-                let side = side.to_side();
-                normalized::MarketEvent::Book(normalized::BookUpdate {
-                    cents: price_to_cents(price),
-                    size: price * size,
-                    side: side,
-                    exchange_time: 0,
                 })
-            })
-            .collect(),
+            });
+            MarketUpdates::Reset(result)
+        }
+        BookUpdate::L2Update(L2Update { changes }) => {
+            let result = changes
+                .iter()
+                .map(|(side, price, size)| {
+                    let price: f64 = price.parse::<f64>().expect("Bad floating point");
+                    let size: f64 = size.parse::<f64>().expect("Bad floating point");
+                    let side = side.to_side();
+                    normalized::BookUpdate {
+                        cents: price_to_cents(price),
+                        size: price * size,
+                        side: side,
+                        exchange_time: 0,
+                    }
+                })
+                .collect();
+            MarketUpdates::Book(result)
+        }
     })
 }
