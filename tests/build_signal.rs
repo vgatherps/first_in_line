@@ -1,5 +1,6 @@
 #![allow(warnings)]
 #[macro_use]
+use arby::exchange::normalized::MarketUpdates;
 use arby::order_book::*;
 use arby::signal_graph::graph_registrar::*;
 use arby::signal_graph::interface_types::*;
@@ -154,5 +155,6 @@ fn construct_graph() {
     let consumer3 = graph.signal_listener("consumer3", "out").unwrap();
 
     let data = vec![].into_iter().collect();
+    let data = MarketUpdates::Book(data);
     graph.trigger_book(sec_map.to_index(&btc).unwrap(), &data, 0, |_, _| ());
 }
