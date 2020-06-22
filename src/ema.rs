@@ -1,3 +1,4 @@
+use crate::exchange::normalized::MarketUpdates;
 use crate::signal_graph::graph_registrar::*;
 use crate::signal_graph::interface_types::*;
 use serde::Deserialize;
@@ -17,7 +18,7 @@ struct EmaInit {
 }
 
 impl CallSignal for Ema {
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         let result_valid = self
             .input
             .get(graph)

@@ -58,7 +58,7 @@ impl RegisterSignal for RemoteVenueAggregator {
 impl CallSignal for RemoteVenueAggregator {
     // TODO only iterate over changed, although... that requires better zipping api
     // for the aggregate updates. Must think about how to do such a thing
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         let mut total_price = 0.0;
         let mut total_size = 0.0;
         for (fair, size) in self.fairs.iter() {

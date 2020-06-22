@@ -1,3 +1,4 @@
+use crate::exchange::normalized::MarketUpdates;
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 use crate::signal_graph::graph_registrar::*;
 use crate::signal_graph::interface_types::*;
@@ -94,7 +95,7 @@ impl CallSignal for FairValue {
     // Why is iterating over so few levels taking a full microsecond? It makes no sense.
     // Btreemap should be optimal for this sort of behavior
     // Way, Way, Way too slow. Maybe use front-biased book?
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         let (best_bid, best_ask) = match self.book.book().bbo_price() {
             (Some(best_bid), Some(best_ask)) => (best_bid, best_ask),
             _ => {

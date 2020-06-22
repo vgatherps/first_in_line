@@ -1,8 +1,7 @@
 use crate::exchange::normalized;
 use crate::exchange::{
-    bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
-    ftx_connection,
-    BybitType, HuobiType, OkexType,
+    bitmex_connection, bybit_connection, coinbase_connection, ftx_connection, huobi_connection,
+    okex_connection, BybitType, HuobiType, OkexType,
 };
 
 use crate::signal_graph::security_index::*;

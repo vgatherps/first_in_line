@@ -1,6 +1,8 @@
 use crate::signal_graph::graph_registrar::*;
 use crate::signal_graph::interface_types::*;
 
+use crate::exchange::normalized::MarketUpdates;
+
 use std::collections::{HashMap, HashSet};
 
 pub struct BookImprovedSignal {
@@ -11,7 +13,7 @@ pub struct BookImprovedSignal {
 }
 
 impl CallSignal for BookImprovedSignal {
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         match self.book.book().bbo_price() {
             (Some(best_bid), Some(best_ask)) => {
                 match self.tob {
@@ -31,7 +33,7 @@ impl CallSignal for BookImprovedSignal {
         }
     }
 
-    fn cleanup(&mut self, _: u128, graph: &GraphHandle) {
+    fn cleanup(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         self.improved_bid_to.mark_invalid(graph);
         self.improved_ask_to.mark_invalid(graph);
     }

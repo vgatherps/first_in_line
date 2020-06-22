@@ -18,7 +18,7 @@ struct DummyConsumerSignal {
 }
 
 impl CallSignal for DummyBookSignal {
-    fn call_signal(&mut self, time: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, time: u128, _: &MarketUpdates, graph: &GraphHandle) {
         assert!(!self.output.was_written(graph));
         self.output
             .set(1.0 + self.output.get(graph).unwrap_or(1.0), graph)
@@ -26,7 +26,7 @@ impl CallSignal for DummyBookSignal {
 }
 
 impl CallSignal for DummyConsumerSignal {
-    fn call_signal(&mut self, time: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, time: u128, _: &MarketUpdates, graph: &GraphHandle) {
         assert!(!self.output.was_written(graph));
         self.output.set(self.input.get(graph).unwrap(), graph);
     }

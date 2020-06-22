@@ -1,3 +1,4 @@
+use crate::exchange::normalized::MarketUpdates;
 use crate::signal_graph::graph_registrar::*;
 use crate::signal_graph::interface_types::*;
 
@@ -17,7 +18,7 @@ pub struct Premium {
 // TODO use case for exposing complex signals as a single reusable block
 
 impl CallSignal for Premium {
-    fn call_signal(&mut self, _: u128, graph: &GraphHandle) {
+    fn call_signal(&mut self, _: u64, _: &MarketUpdates, graph: &GraphHandle) {
         self.diff.set_from(
             self.in1
                 .and(&self.in2, graph)

@@ -88,10 +88,26 @@ impl MarketUpdates {
             MarketUpdates::Book(_) | MarketUpdates::Reset(_) => MarketDataTag::Book,
         }
     }
+
+    #[inline]
+    pub fn as_book(&self) -> Option<&SmallVec<BookUpdate>> {
+        match self {
+            MarketUpdates::Book(ev) | MarketUpdates::Reset(ev) => Some(ev),
+        }
+    }
+
+    #[inline]
+    pub fn is_reset(&self) -> bool {
+        match self {
+            MarketUpdates::Reset(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MarketEventBlock {
+    pub received_time: u64,
     pub exchange: Exchange,
     pub events: MarketUpdates,
 }
@@ -183,6 +199,7 @@ impl MarketDataStream {
                         if events.len() > 0 {
                             return MarketEventBlock {
                                 events,
+                                received_time: now as u64,
                                 exchange: self.exchange,
                             };
                         }

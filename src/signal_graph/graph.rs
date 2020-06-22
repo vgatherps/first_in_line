@@ -36,8 +36,8 @@ pub struct GraphInnerMem {
 pub(crate) struct GraphCallList {
     // TODO pull out specific functions from vtable
     // not high importance, only worth doing after proper testing is in place
-    pub(crate) calls: Vec<(fn(*mut u8, u128, &GraphInnerMem), *mut u8)>,
-    pub(crate) cleanup: Vec<(fn(*mut u8, u128, &GraphInnerMem), *mut u8)>,
+    pub(crate) calls: Vec<(fn(*mut u8, u64, &MarketUpdates, &GraphInnerMem), *mut u8)>,
+    pub(crate) cleanup: Vec<(fn(*mut u8, u64, &MarketUpdates, &GraphInnerMem), *mut u8)>,
     pub(crate) mem: Rc<GraphInnerMem>,
     pub(crate) mark_as_clean: Vec<u16>,
 }
@@ -326,15 +326,15 @@ fn get_index_for(
 
 impl GraphCallList {
     // TODO check types
-    fn trigger(&mut self, time: u128, graph: &GraphInnerMem) {
+    fn trigger(&mut self, time: u64, updates: &MarketUpdates, graph: &GraphInnerMem) {
         for (call, ptr) in self.calls.iter() {
-            call(*ptr, time, graph);
+            call(*ptr, time, updates, graph);
         }
     }
 
-    fn cleanup(&mut self, time: u128, graph: &GraphInnerMem) {
+    fn cleanup(&mut self, time: u64, updates: &MarketUpdates, graph: &GraphInnerMem) {
         for (call, ptr) in self.cleanup.iter() {
-            call(*ptr, time, graph)
+            call(*ptr, time, updates, graph)
         }
 
         let mark_slice = &self.mem.mark_bitmask[..];
@@ -358,11 +358,11 @@ impl GraphCallList {
 }
 
 impl Graph {
-    pub fn trigger_book<F: Fn(u128, &GraphInnerMem)>(
+    pub fn trigger_book<F: Fn(u64, &GraphInnerMem)>(
         &mut self,
         security: SecurityIndex,
         events: &MarketUpdates,
-        time: u128,
+        time: u64,
         fnc: F,
     ) {
         {
@@ -370,14 +370,10 @@ impl Graph {
             book.handle_updates(events);
         }
 
-        // TODO benchmark the performance issues here -
-        // Is it just since my laptop has no cores/weird scheduling?
-        // results are wayyyyy too expensive by any interpretation?
-        // even for empty calls takes ~1-2k cycles with high variance
         if let Some(calls) = self.book_updates.get_mut(security) {
-            calls.trigger(time, &self.mem);
+            calls.trigger(time, events, &self.mem);
             fnc(time, &self.mem);
-            calls.cleanup(time, &self.mem);
+            calls.cleanup(time, events, &self.mem);
         }
     }
 

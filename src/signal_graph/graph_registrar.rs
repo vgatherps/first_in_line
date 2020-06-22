@@ -10,6 +10,8 @@ use super::graph_sort::generate_calls_for;
 use super::security_data::SecurityVector;
 use super::security_index::{Security, SecurityMap};
 
+use crate::exchange::normalized::MarketUpdates;
+
 pub type GraphHandle = GraphInnerMem;
 
 pub struct GraphRegistrar {
@@ -27,8 +29,8 @@ pub struct SignalDefinition {
         name: &str,
         objects: &mut dynstack::DynStack<dyn CallSignal>,
     ) -> Result<u16, GraphError>,
-    pub(crate) caller: fn(obj: *mut u8, time: u128, graph: &GraphInnerMem),
-    pub(crate) cleanup: Option<fn(obj: *mut u8, time: u128, graph: &GraphInnerMem)>,
+    pub(crate) caller: fn(*mut u8, u64, &MarketUpdates, &GraphInnerMem),
+    pub(crate) cleanup: Option<fn(*mut u8, u64, &MarketUpdates, &GraphInnerMem)>,
 }
 
 #[derive(Clone)]
@@ -136,8 +138,8 @@ impl GraphRegistrar {
 }
 
 pub trait CallSignal {
-    fn call_signal(&mut self, time: u128, graph: &GraphInnerMem);
-    fn cleanup(&mut self, time: u128, _: &GraphInnerMem) {
+    fn call_signal(&mut self, time: u64, updates: &MarketUpdates, graph: &GraphInnerMem);
+    fn cleanup(&mut self, _: u64, _: &MarketUpdates, _: &GraphInnerMem) {
         unimplemented!("Cleanup called for signal without implementation, check your registrations")
     }
 }
@@ -169,14 +171,19 @@ pub fn make_signal_for<T: CallSignal + RegisterSignal<Child = T> + 'static>() ->
         Ok(index as u16)
     }
 
-    fn _call_signal<F: CallSignal>(data: *mut u8, time: u128, graph: &GraphInnerMem) {
+    fn _call_signal<F: CallSignal>(
+        data: *mut u8,
+        time: u64,
+        updates: &MarketUpdates,
+        graph: &GraphInnerMem,
+    ) {
         let real_ref = unsafe { &mut *(data as *mut F) };
-        real_ref.call_signal(time, graph)
+        real_ref.call_signal(time, updates, graph)
     }
 
-    fn _cleanup_signal<F: CallSignal>(data: *mut u8, time: u128, graph: &GraphInnerMem) {
+    fn _cleanup_signal<F: CallSignal>(data: *mut u8, time: u64, events: &MarketUpdates, graph: &GraphInnerMem) {
         let real_ref = unsafe { &mut *(data as *mut F) };
-        real_ref.cleanup(time, graph)
+        real_ref.cleanup(time, events, graph)
     }
 
     SignalDefinition {
