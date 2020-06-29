@@ -367,7 +367,9 @@ impl Graph {
     ) {
         {
             let mut book = self.mem.books.get(security).borrow_mut();
-            book.handle_updates(events);
+            if let Some(events) = events.as_book() {
+                book.handle_updates(events);
+            }
         }
 
         if let Some(calls) = self.book_updates.get_mut(security) {

@@ -127,17 +127,13 @@ impl OrderBook {
         }
     }
 
-    pub fn handle_updates(&mut self, updates: &MarketUpdates) {
-        match updates {
-            MarketUpdates::Reset(_) => *self = OrderBook::new(),
-            _ => (),
-        };
-        match updates {
-            MarketUpdates::Book(data) | MarketUpdates::Reset(data) => {
-                for event in data {
-                    self.handle_book_event(event);
-                }
-            }
+    pub fn reset(&mut self) {
+        *self = OrderBook::new();
+    }
+
+    pub fn handle_updates(&mut self, updates: &SmallVec<BookUpdate>) {
+        for event in updates {
+            self.handle_book_event(event);
         }
     }
 

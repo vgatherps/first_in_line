@@ -42,7 +42,7 @@ impl OkexType {
         match self {
             OkexType::Spot => "spot/depth_l2_tbt:BTC-USDT",
             OkexType::Swap => "swap/depth_l2_tbt:BTC-USD-SWAP",
-            OkexType::Quarterly => "futures/depth_l2_tbt:BTC-USD-200626",
+            OkexType::Quarterly => "futures/depth_l2_tbt:BTC-USD-200925",
         }
     }
 

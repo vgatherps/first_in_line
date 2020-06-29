@@ -59,10 +59,29 @@ impl Hash for BookUpdate {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Trade {
+    pub cents: usize,
+    pub side: Side,
+    pub size: f64,
+    pub exchange_time: usize,
+}
+
+impl Hash for Trade {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.cents.hash(hasher);
+        self.side.hash(hasher);
+        self.exchange_time.hash(hasher);
+        let int_size = (self.size * 100.0).round() as u64;
+        int_size.hash(hasher);
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Hash)]
 pub enum MarketUpdates {
     Book(SmallVec<BookUpdate>),
     Reset(SmallVec<BookUpdate>),
+    Trades(SmallVec<Trade>)
 }
 
 #[repr(C)]
@@ -79,6 +98,7 @@ impl MarketUpdates {
     pub fn len(&self) -> usize {
         match self {
             MarketUpdates::Book(ev) | MarketUpdates::Reset(ev) => ev.len(),
+            MarketUpdates::Trades(tr) => tr.len()
         }
     }
 
@@ -86,6 +106,7 @@ impl MarketUpdates {
     pub fn to_tag(&self) -> MarketDataTag {
         match self {
             MarketUpdates::Book(_) | MarketUpdates::Reset(_) => MarketDataTag::Book,
+            MarketUpdates::Trades(_) => MarketDataTag::Trade,
         }
     }
 
@@ -93,6 +114,7 @@ impl MarketUpdates {
     pub fn as_book(&self) -> Option<&SmallVec<BookUpdate>> {
         match self {
             MarketUpdates::Book(ev) | MarketUpdates::Reset(ev) => Some(ev),
+            _ => None,
         }
     }
 
