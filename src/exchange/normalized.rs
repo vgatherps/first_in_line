@@ -1,12 +1,16 @@
-use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
+use std::os::unix::io::AsRawFd;
+use tokio_tungstenite::tungstenite::Message;
 
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
-pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
+pub type DataStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::stream::Stream<
+tokio::net::TcpStream,
+tokio_native_tls::TlsStream<tokio::net::TcpStream>,
+>>;
 
 pub fn convert_price_cents(price: f64) -> usize {
     (price * 100.0).round() as usize
@@ -19,17 +23,15 @@ pub enum Exchange {
     OkexSwap,
     OkexQuarterly,
     HuobiSpot,
-    BybitUSDT,
-    BybitInverse,
-    Coinbase,
-    // Non-used by remote exchanges go below here
-    COUNT,
-    // This is the local exchange
-    Bitmex,
-    // These don't seem to work for some reason
     HuobiSwap,
     HuobiQuarterly,
+    BybitUSDT,
+    Bitmex,
     Ftx,
+    // Non-used by remote exchanges go below here
+    COUNT,
+    BybitInverse,
+    // This is the local exchange
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone, Hash)]
@@ -104,6 +106,7 @@ pub struct MarketDataStream {
     exchange: Exchange,
     operator: fn(Message) -> DataOrResponse,
     num_created: usize,
+    seen: bool,
 }
 
 async fn lookup_stream(exchange: Exchange) -> DataStream {
@@ -122,16 +125,13 @@ async fn lookup_stream(exchange: Exchange) -> DataStream {
         Exchange::OkexSpot => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Spot).await
         }
-        Exchange::Ftx => {
-            crate::exchange::ftx_connection().await
-        },
+        Exchange::Ftx => crate::exchange::ftx_connection().await,
         Exchange::OkexSwap => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Swap).await
         }
         Exchange::OkexQuarterly => {
             crate::exchange::okex_connection(crate::exchange::okex::OkexType::Quarterly).await
         }
-        Exchange::Coinbase => crate::exchange::coinbase_connection().await,
         Exchange::BybitUSDT => {
             crate::exchange::bybit_connection(crate::exchange::bybit::BybitType::USDT).await
         }
@@ -159,11 +159,16 @@ impl MarketDataStream {
             exchange,
             operator,
             num_created: 0,
+            seen: false,
         }
     }
 
     pub async fn ping(&mut self) {
         let _ = self.stream.send(Message::Ping(Vec::new())).await;
+    }
+
+    pub fn quickack(&self) {
+        set_sock_opt(&self.stream);
     }
 
     pub async fn next(&mut self) -> MarketEventBlock {
@@ -190,6 +195,11 @@ impl MarketDataStream {
                             DataOrResponse::Data(events) => events,
                         };
                         if events.len() > 0 {
+                            if !self.seen {
+                                self.seen = true;
+                                println!("Saw first message from {:?}",
+                                         self.exchange);
+                            }
                             return MarketEventBlock {
                                 events,
                                 received_time: now,
@@ -219,3 +229,21 @@ impl MarketDataStream {
         }
     }
 }
+
+#[cfg(target_platform = "linux")]
+fn set_sock_opt(stream: &DataStream) {
+    unsafe {
+        let raw = stream.as_ref().as_raw_fd();
+        let set_to = 1;
+        libc::setsockopt(
+            raw,
+            libc::IPROTO_TCP,
+            &libc::TCP_QUICKACK,
+            &set_to as *const _ as *const libc::c_void,
+            std::mem::size_of::<set_to>() as libc::sockopt_t,
+        );
+    }
+}
+
+#[cfg(not(target_platform = "linux"))]
+fn set_sock_opt(stream: &DataStream) {}

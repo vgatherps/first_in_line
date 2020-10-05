@@ -1,12 +1,11 @@
 #![recursion_limit = "512"]
-#![allow(warnings)]
 //WARNING
 //WARNING
 //
 //I would not abide by all of the given practices in here in production quality trading code
 
 use exchange::{
-    bitmex_connection, bybit_connection, coinbase_connection, huobi_connection, okex_connection,
+    bitmex_connection, bybit_connection, ftx_connection, huobi_connection, okex_connection,
     BybitType, HuobiType, OkexType,
 };
 
@@ -25,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::{HashMap, HashSet};
 
 mod args;
-mod bitmex_http;
+mod bybit_http;
 mod displacement;
 mod ema;
 mod exchange;
@@ -62,8 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub enum TacticInternalEvent {
-    OrderCanceled(bitmex_http::OrderCanceled),
-    Trades(SmallVec<bitmex_http::Transaction>),
+    OrderCanceled(bybit_http::OrderCanceled),
+    Trades(SmallVec<bybit_http::Transaction>),
     SetLateStatus(Side, usize, usize),
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
@@ -75,8 +74,8 @@ pub enum TacticInternalEvent {
 enum TacticEventType {
     RemoteFair,
     LocalBook(SmallVec<local_book::InsideOrder>),
-    Trades(SmallVec<bitmex_http::Transaction>),
-    AckCancel(bitmex_http::OrderCanceled),
+    Trades(SmallVec<bybit_http::Transaction>),
+    AckCancel(bybit_http::OrderCanceled),
     CancelStale(Side, usize, usize),
     CheckGone(Side, usize, usize),
     SetLateStatus(Side, usize, usize),
@@ -112,17 +111,13 @@ async fn html_writer_loop(mut event_queue: tokio::sync::mpsc::Sender<TacticInter
 }
 
 async fn get_max_timestamp(
-    last_seen: Option<String>,
-    http: Arc<bitmex_http::BitmexHttp>,
-) -> (String, SmallVec<bitmex_http::Transaction>) {
+    last_seen: Option<usize>,
+    http: Arc<bybit_http::BybitHttp>,
+) -> (usize, SmallVec<bybit_http::Transaction>) {
     let transactions = http
         .request_transactions_from(last_seen.clone(), http.clone())
         .await;
-    let last_seen_filter = if let Some(ls) = last_seen {
-        ls
-    } else {
-        String::new()
-    };
+    let last_seen_filter = if let Some(ls) = last_seen { ls } else { 0 };
     // We must reverse the transactions to go from oldest to newest
     let transactions: SmallVec<_> = transactions
         .into_iter()
@@ -138,8 +133,8 @@ async fn get_max_timestamp(
 }
 
 async fn transaction_loop(
-    mut last_seen: String,
-    http: Arc<bitmex_http::BitmexHttp>,
+    mut last_seen: usize,
+    http: Arc<bybit_http::BybitHttp>,
     mut event_queue: tokio::sync::mpsc::Sender<TacticInternalEvent>,
 ) {
     let myloop = LOOP.load(Ordering::Relaxed);
@@ -177,13 +172,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (html_queue, html_reader) = std::sync::mpsc::channel();
 
     //http state lives outside of the loop to properly rate-limit requests
-    let http = bitmex_http::BitmexHttp::new(args.auth_key, args.auth_secret);
+    let http = bybit_http::BybitHttp::new(args.auth_key, args.auth_secret);
     let http = Arc::new(http);
+
+    let test_position = position_manager::PositionManager::create(http.clone()).await;
+    http.request_positions(http.clone()).await;
 
     let html = args.html.clone();
     std::thread::spawn(move || html_writer(html, html_reader));
-
-    let test_position = position_manager::PositionManager::create(http.clone()).await;
 
     let mut statistics = tactic::TacticStatistics::new();
 
@@ -201,23 +197,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let position = position_manager::PositionManager::create(http.clone()).await;
 
             let (
-                mut bitmex,
+                mut bybit_inverse,
                 okex_spot,
                 okex_swap,
                 okex_quarterly,
                 bybit_usdt,
-                bybit_inverse,
+                ftx,
+                bitmex,
                 huobi,
-                coinbase,
             ) = join!(
-                bitmex_connection(),
+                bybit_connection(BybitType::Inverse),
                 okex_connection(OkexType::Spot),
                 okex_connection(OkexType::Swap),
                 okex_connection(OkexType::Quarterly),
                 bybit_connection(BybitType::USDT),
-                bybit_connection(BybitType::Inverse),
+                ftx_connection(),
+                bitmex_connection(),
                 huobi_connection(HuobiType::Spot),
-                coinbase_connection(),
             );
 
             // Spawn all tasks after we've connected to everything
@@ -238,9 +234,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 okex_swap,
                 okex_quarterly,
                 bybit_usdt,
-                bybit_inverse,
+                bitmex,
                 huobi,
-                coinbase,
+                ftx,
                 remote_fair_value,
                 0.001,
             );
@@ -266,10 +262,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     panic!("Death variable set");
                 }
                 let event_type = select! {
-                    block = bitmex.next().fuse() => {
+                    block = bybit_inverse.next().fuse() => {
                         TacticEventType::LocalBook(local_book.handle_book_update(&block.events))
                     },
-                    rf = remote_agg.get_new_fair().fuse() => TacticEventType::RemoteFair,
+                    rf = remote_agg.get_new_fair().fuse() => {
+                        TacticEventType::RemoteFair
+                    }
                     event = event_reader.recv().fuse() => match event {
                             Some(TacticInternalEvent::DisplayHtml) => TacticEventType::WriteHtml,
                             Some(TacticInternalEvent::OrderCanceled(cancel)) => TacticEventType::AckCancel(cancel),
@@ -323,7 +321,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     TacticEventType::Ping => {
-                        let _ = join!(bitmex.ping(), remote_agg.ping());
+                        let _ = join!(bybit_inverse.ping(), remote_agg.ping());
                     }
                     TacticEventType::WriteHtml | TacticEventType::None => (),
                 }

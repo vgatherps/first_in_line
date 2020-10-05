@@ -1,4 +1,4 @@
-use crate::bitmex_http::BitmexHttp;
+use crate::bybit_http::BybitHttp;
 
 #[derive(Debug)]
 pub struct PositionManager {
@@ -10,7 +10,7 @@ pub struct PositionManager {
 }
 
 impl PositionManager {
-    pub async fn create(http: std::sync::Arc<BitmexHttp>) -> PositionManager {
+    pub async fn create(http: std::sync::Arc<BybitHttp>) -> PositionManager {
         http.cancel_all(http.clone()).await;
         let initial_xbt_balance = http.request_positions(http.clone()).await;
         PositionManager {

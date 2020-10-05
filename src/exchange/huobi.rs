@@ -3,10 +3,10 @@ use crate::exchange::{
     normalized::{DataOrResponse, SmallVec},
 };
 
-use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::GzDecoder;
 use futures::prelude::*;
 use serde::Deserialize;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use std::io::prelude::Read;
 

@@ -12,9 +12,9 @@ pub struct RemoteVenueAggregator {
     okex_swap: MarketDataStream,
     okex_quarterly: MarketDataStream,
     bybit_usdt: MarketDataStream,
-    bybit_inverse: MarketDataStream,
+    bitmex: MarketDataStream,
+    ftx: MarketDataStream,
     huobi: MarketDataStream,
-    coinbase: MarketDataStream,
     books: [OrderBook; Exchange::COUNT as usize],
     fairs: [f64; Exchange::COUNT as usize],
     size_ema: [Ema; Exchange::COUNT as usize],
@@ -27,9 +27,9 @@ impl RemoteVenueAggregator {
         okex_swap: MarketDataStream,
         okex_quarterly: MarketDataStream,
         bybit_usdt: MarketDataStream,
-        bybit_inverse: MarketDataStream,
+        bitmex: MarketDataStream,
         huobi: MarketDataStream,
-        coinbase: MarketDataStream,
+        ftx: MarketDataStream,
         valuer: FairValue,
         size_ratio: f64,
     ) -> RemoteVenueAggregator {
@@ -38,9 +38,9 @@ impl RemoteVenueAggregator {
             okex_swap,
             okex_quarterly,
             bybit_usdt,
-            bybit_inverse,
+            bitmex,
+            ftx,
             huobi,
-            coinbase,
             valuer,
             fairs: Default::default(),
             size_ema: [Ema::new(size_ratio); Exchange::COUNT as usize],
@@ -70,10 +70,21 @@ impl RemoteVenueAggregator {
             let size = self.size_ema[i].get_value().unwrap_or(0.0);
             assert!(size >= 0.0);
             if size < 10.0 {
-                return None;
+                continue;
             }
+            let size = match i {
+                // Slow data feed
+                _ if i == Exchange::HuobiSpot as usize => size * 0.7,
+                _ if i == Exchange::HuobiSwap as usize => size * 0.7,
+                _ if i == Exchange::HuobiQuarterly as usize => size * 0.7,
+                _ if i == Exchange::Ftx as usize => size * 2.5,
+                _ => size,
+            };
             total_price += self.fairs[i] * size;
             total_size += size;
+        }
+        if total_size < 100.0 {
+            return None;
         }
         Some((total_price / total_size, total_size))
     }
@@ -84,10 +95,10 @@ impl RemoteVenueAggregator {
             b = self.okex_spot.next().fuse() => self.update_fair_for(b),
             b = self.okex_swap.next().fuse() => self.update_fair_for(b),
             b = self.okex_quarterly.next().fuse() => self.update_fair_for(b),
+            b = self.bitmex.next().fuse() => self.update_fair_for(b),
             b = self.huobi.next().fuse() => self.update_fair_for(b),
-            b = self.coinbase.next().fuse() => self.update_fair_for(b),
             b = self.bybit_usdt.next().fuse() => self.update_fair_for(b),
-            b = self.bybit_inverse.next().fuse() => self.update_fair_for(b),
+            b = self.ftx.next().fuse() => self.update_fair_for(b),
         }
     }
 
@@ -96,10 +107,10 @@ impl RemoteVenueAggregator {
             self.okex_spot.ping(),
             self.okex_swap.ping(),
             self.okex_quarterly.ping(),
+            self.bitmex.ping(),
             self.huobi.ping(),
-            self.coinbase.ping(),
             self.bybit_usdt.ping(),
-            self.bybit_inverse.ping(),
+            self.ftx.ping(),
         );
     }
 
@@ -132,13 +143,19 @@ impl RemoteVenueAggregator {
                         : format!("BybitUSDT: {}", self.get_exchange_description(Exchange::BybitUSDT))
                     }
                     li(first?=false, class="item") {
-                        : format!("BybitInverse: {}", self.get_exchange_description(Exchange::BybitInverse))
+                        : format!("Bitmex: {}", self.get_exchange_description(Exchange::Bitmex))
                     }
                     li(first?=false, class="item") {
                         : format!("Huobi: {}", self.get_exchange_description(Exchange::HuobiSpot))
                     }
                     li(first?=false, class="item") {
-                        : format!("Coinbase: {}", self.get_exchange_description(Exchange::Coinbase))
+                        : format!("HuobiSwap: {}", self.get_exchange_description(Exchange::HuobiSwap))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("HuobiQuarterly: {}", self.get_exchange_description(Exchange::HuobiQuarterly))
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Ftx: {}", self.get_exchange_description(Exchange::Ftx))
                     }
                     li(first?=false, class="item") {
                         : format!("Fair value+size: {:?}", self.calculate_fair().unwrap_or((0.0, 0.0)))

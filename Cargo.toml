@@ -28,9 +28,10 @@ crate-type = ["rlib", "staticlib"]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_urlencoded = "*"
-async-tungstenite = {git = "https://github.com/vgatherps/async-tungstenite", features = ["tokio-runtime", "tokio-tls"]}
+tokio-tungstenite = { version = "0.11", features = ["tls"] }
 tokio = { version = "*", features = ["full", "time"] }
 tokio-tls = "*"
+tokio-native-tls = "*"
 futures = "*"
 flate2 = "*"
 horrorshow = "0.8.3"
@@ -51,3 +52,4 @@ dynstack = "0.4"
 thiserror = "1"
 crossbeam = "0.7.3"
 hdrhistogram = "7"
+libc = "0.2"

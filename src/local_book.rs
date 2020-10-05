@@ -10,6 +10,7 @@ pub struct LocalBook {
     book: OrderBook,
 }
 
+// When a level goes away, I for now also fake a new 'inside order'
 #[derive(Debug)]
 pub struct InsideOrder {
     pub insert_price: usize,
@@ -54,6 +55,7 @@ impl LocalBook {
                             insert_price: prc.unsigned(),
                             insert_size: *size,
                         });
+
                     let asks = self
                         .book
                         .asks()
@@ -63,7 +65,25 @@ impl LocalBook {
                             insert_price: prc.unsigned(),
                             insert_size: *size,
                         });
-                    bids.chain(asks).collect()
+                    let mut new: SmallVec<_> = bids.chain(asks).collect();
+
+                    // Insert fakes to ensure we rapidly chase a gap in the book
+                    if ask > old_ask {
+                        new.push(InsideOrder {
+                            side: Side::Buy,
+                            insert_price: old_ask,
+                            insert_size: 1.0,
+                        });
+                    }
+
+                    if bid < old_bid {
+                        new.push(InsideOrder {
+                            side: Side::Sell,
+                            insert_price: old_bid,
+                            insert_size: 1.0,
+                        });
+                    }
+                    new
                 } else {
                     SmallVec::new()
                 };

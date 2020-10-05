@@ -4,10 +4,10 @@ use crate::exchange::{
 };
 type SmallString = smallstr::SmallString<[u8; 64]>;
 
-use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use flate2::read::DeflateDecoder;
 use futures::prelude::*;
 use serde::Deserialize;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use std::io::prelude::Read;
 
@@ -41,9 +41,7 @@ pub async fn ftx_connection() -> normalized::MarketDataStream {
     stream.send(msg).await.expect("Could not request L2 stream");
     let ack = stream.next().await.unwrap().unwrap();
     match ack {
-        Message::Text(data) => {
-            data
-        }
+        Message::Text(data) => data,
         data => panic!("Incorrect ack type {:?}", data),
     };
     normalized::MarketDataStream::new(stream, normalized::Exchange::Ftx, convert_ftx)
@@ -51,9 +49,7 @@ pub async fn ftx_connection() -> normalized::MarketDataStream {
 
 pub fn convert_ftx(data: Message) -> DataOrResponse {
     let data = match data {
-        Message::Text(data) => {
-            data
-        }
+        Message::Text(data) => data,
         data => panic!("Incorrect message type {:?}", data),
     };
     let message = serde_json::from_str(&data).expect("Couldn't parse ftx message");

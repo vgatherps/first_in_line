@@ -2,9 +2,9 @@ use crate::exchange::{
     normalized,
     normalized::{DataOrResponse, SmallVec},
 };
-use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 type SmallString = smallstr::SmallString<[u8; 64]>;
 
 fn price_to_cents(price: f64) -> usize {
@@ -20,8 +20,8 @@ pub enum BybitType {
 impl BybitType {
     pub fn product(&self) -> &str {
         match self {
-            BybitType::USDT => "wss://stream.bybit.com/realtime_public",
-            BybitType::Inverse => "wss://stream.bybit.com/realtime",
+            BybitType::USDT => "wss://stream.bytick.com/realtime_public",
+            BybitType::Inverse => "wss://stream.bytick.com/realtime",
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::bitmex_http::{BitmexHttp, OrderCanceled, Transaction};
+use crate::bybit_http::{BybitHttp, OrderCanceled, Transaction};
 use crate::exchange::normalized::{convert_price_cents, Side};
 use crate::local_book::InsideOrder;
 use crate::order_book::{BuyPrice, OrderBook, SellPrice, SidedPrice};
@@ -63,7 +63,7 @@ pub struct Tactic<'a> {
     rng: Xorshift128,
 
     main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
-    http: std::sync::Arc<BitmexHttp>,
+    http: std::sync::Arc<BybitHttp>,
 }
 
 // TODO should really care about exchange times
@@ -80,7 +80,7 @@ async fn order_caller(
     price: f64,
     clid: usize,
     side: Side,
-    http: std::sync::Arc<BitmexHttp>,
+    http: std::sync::Arc<BybitHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
     let _guard = scopeguard::guard((), |_| {
@@ -96,7 +96,7 @@ async fn order_caller(
         // We got rejected for overload
         assert!(eventer
             .send(crate::TacticInternalEvent::OrderCanceled(
-                crate::bitmex_http::OrderCanceled {
+                crate::bybit_http::OrderCanceled {
                     price,
                     amount,
                     side,
@@ -145,7 +145,7 @@ async fn order_caller(
 
 async fn cancel_caller(
     id: usize,
-    http: std::sync::Arc<BitmexHttp>,
+    http: std::sync::Arc<BybitHttp>,
     mut eventer: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
 ) {
     let _guard = scopeguard::guard((), |_| {
@@ -174,10 +174,10 @@ impl<'a> Tactic<'a> {
         base_trade_contracts: usize,
         position: PositionManager,
         statistics: &'a mut TacticStatistics,
-        http: std::sync::Arc<crate::bitmex_http::BitmexHttp>,
+        http: std::sync::Arc<crate::bybit_http::BybitHttp>,
         main_loop_not: tokio::sync::mpsc::Sender<crate::TacticInternalEvent>,
     ) -> Tactic {
-        assert!(profit_bps > profit_bps_cancel);
+        assert!(profit_bps >= profit_bps_cancel);
         Tactic {
             required_profit: 0.01 * 0.01 * profit_bps,
             required_profit_cancel: 0.01 * 0.01 * profit_bps_cancel,
@@ -494,7 +494,7 @@ impl<'a> Tactic<'a> {
         }
         // shuffle +/ 64 dollars on order size
         let trade_xbt = self.base_trade_contracts + (self.rng.next_u64() % 128) as usize;
-        assert!(trade_xbt > 100);
+        assert!(trade_xbt > 50);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if !self
@@ -687,7 +687,7 @@ impl<'a> Tactic<'a> {
     }
 }
 
-async fn do_cancel_all(http: std::sync::Arc<BitmexHttp>) {
+async fn do_cancel_all(http: std::sync::Arc<BybitHttp>) {
     http.cancel_all(http.clone()).await
 }
 

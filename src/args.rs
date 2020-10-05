@@ -26,7 +26,7 @@ pub struct Arguments {
 
     #[structopt(
         long,
-        default_value = "400",
+        default_value = "67",
         help = "Baseline trade size sans randomization"
     )]
     pub base_trade_contracts: usize,

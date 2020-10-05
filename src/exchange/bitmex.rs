@@ -2,9 +2,9 @@ use crate::exchange::{
     normalized,
     normalized::{DataOrResponse, SmallVec},
 };
-use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use futures::prelude::*;
 use serde::Deserialize;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 fn cents_from_id(id: usize) -> usize {
     (100000000 * 88usize).checked_sub(id).unwrap()

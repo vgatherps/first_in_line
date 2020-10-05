@@ -136,7 +136,7 @@ fn main() {
                         child.timestamp - master.timestamp
                     };
                     println!("Difference is {} us", diff);
-                },
+                }
                 _ => panic!("Got missing data even with lengths"),
             }
         }
