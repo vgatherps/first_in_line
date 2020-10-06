@@ -77,7 +77,8 @@ impl RemoteVenueAggregator {
                 _ if i == Exchange::HuobiSpot as usize => size * 0.7,
                 _ if i == Exchange::HuobiSwap as usize => size * 0.7,
                 _ if i == Exchange::HuobiQuarterly as usize => size * 0.7,
-                _ if i == Exchange::Ftx as usize => size * 2.5,
+                _ if i == Exchange::Ftx as usize => size * 7.0,
+                _ if i == Exchange::OkexSpot as usize => size * 2.0,
                 _ => size,
             };
             total_price += self.fairs[i] * size;

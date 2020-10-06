@@ -24,7 +24,7 @@ impl Displacement {
             local_slow_ema: Ema::new(0.01),
             remote_size: 0.0,
             local_size: Ema::new(0.001),
-            premium_ema: Ema::new(0.005),
+            premium_ema: Ema::new(0.03),
         }
     }
 

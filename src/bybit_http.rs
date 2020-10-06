@@ -292,9 +292,9 @@ impl BybitHttp {
         if result.contains("unknown") {
             return None;
         }
-        let order = serde_json::from_str::<Result<InnerOrderCanceled>>(&result)
-            .expect("Couldn't parse cancel response")
-            .result;
+        let order = serde_json::from_str::<Result<Option<InnerOrderCanceled>>>(&result)
+            .expect(&format!("Couldn't parse cancel response: {}", result))
+            .result?;
         Some(OrderCanceled {
             price: order.price,
             amount: order.amount_order,
