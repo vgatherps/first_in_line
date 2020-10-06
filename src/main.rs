@@ -227,7 +227,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ));
 
             let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
-            let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
+            let local_fair_value = FairValue::new(1.0, 0.05, 20.0, 20);
 
             let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
                 okex_spot,

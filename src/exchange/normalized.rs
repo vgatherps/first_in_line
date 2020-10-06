@@ -23,15 +23,16 @@ pub enum Exchange {
     OkexSwap,
     OkexQuarterly,
     HuobiSpot,
-    HuobiSwap,
-    HuobiQuarterly,
     BybitUSDT,
     Bitmex,
     Ftx,
     // Non-used by remote exchanges go below here
     COUNT,
-    BybitInverse,
     // This is the local exchange
+    BybitInverse,
+    // These ones are busted
+    HuobiSwap,
+    HuobiQuarterly,
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone, Hash)]

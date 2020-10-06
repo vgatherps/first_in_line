@@ -33,7 +33,7 @@ pub struct Arguments {
 
     #[structopt(
         long,
-        default_value = "0.0015",
+        default_value = "0.0025",
         help = "Pricing cost of holding a position"
     )]
     pub cost_of_position: f64,

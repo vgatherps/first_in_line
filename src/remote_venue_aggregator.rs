@@ -149,12 +149,6 @@ impl RemoteVenueAggregator {
                         : format!("Huobi: {}", self.get_exchange_description(Exchange::HuobiSpot))
                     }
                     li(first?=false, class="item") {
-                        : format!("HuobiSwap: {}", self.get_exchange_description(Exchange::HuobiSwap))
-                    }
-                    li(first?=false, class="item") {
-                        : format!("HuobiQuarterly: {}", self.get_exchange_description(Exchange::HuobiQuarterly))
-                    }
-                    li(first?=false, class="item") {
                         : format!("Ftx: {}", self.get_exchange_description(Exchange::Ftx))
                     }
                     li(first?=false, class="item") {

@@ -24,7 +24,7 @@ impl Displacement {
             local_slow_ema: Ema::new(0.01),
             remote_size: 0.0,
             local_size: Ema::new(0.001),
-            premium_ema: Ema::new(0.001),
+            premium_ema: Ema::new(0.005),
         }
     }
 
@@ -103,7 +103,7 @@ impl Displacement {
                                   momentum_disp);
                     }
                     li(first?=false, class="item") {
-                        : format!("Fair premium: {:.2}, current: {:.3}, imbalance: {:.3}",
+                        : format!("Fair premium: {:.2}, current: {:.3}, offset: {:.3}",
                                   prem, estimated_current, imbalance);
                     }
                 }
