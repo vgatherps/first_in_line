@@ -11,6 +11,7 @@ use xorshift::{Rng, Xorshift128};
 use std::collections::VecDeque;
 use std::time::SystemTime;
 
+use std::cell::Cell;
 use std::sync::atomic::Ordering;
 
 pub struct TacticStatistics {
@@ -61,6 +62,7 @@ pub struct Tactic<'a> {
     max_orders_side: usize,
     worry_orders_side: usize,
     max_send: usize,
+    last_around: Cell<f64>,
 
     statistics: &'a mut TacticStatistics,
     order_manager: OrderManager,
@@ -143,12 +145,13 @@ impl<'a> Tactic<'a> {
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
             place_inside: 0.01 * place_inside,
-            imbalance_adjust: 0.2,
+            imbalance_adjust: 0.5,
             cancel_mult: 0.3,
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
             max_send: 100000,
+            last_around: Cell::new(0.0),
             // reproducible seed is fine here, better for sims
             rng: xorshift::thread_rng(),
             position,
@@ -381,14 +384,24 @@ impl<'a> Tactic<'a> {
         self.position.get_position_imbalance(fair) * self.cost_of_position
     }
 
+    fn get_around(&self,
+                  fair: f64,
+                  premium_imbalance: f64) -> f64 {
+        let around = fair + self.get_position_imbalance_cost(fair);
+        let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
+        let around = around + imbalance_adjustment;
+        self.last_around.set(around);
+        around
+    }
+
     fn consider_order_cancel(
         &self,
-        around: f64,
+        fair: f64,
         premium_imbalance: f64,
         prc: f64,
         side: Side,
     ) -> bool {
-        let around = around + self.get_position_imbalance_cost(around);
+        let around = self.get_around(fair, premium_imbalance);
         let required_diff = (self.required_fees + self.required_profit) * self.cancel_mult * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
@@ -397,17 +410,16 @@ impl<'a> Tactic<'a> {
         // if we're too high, this is positive, so we subtract from the diff
         // if we're too low, this is negative, to we flip first before subtracting
         // Here, I do so before multiplying but it has the same effect
-        let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
         let diff = prc - around;
         let diff = diff.min(30.0).max(-30.0);
-        let diff = (diff + imbalance_adjustment) * dir_mult;
+        let diff = diff * dir_mult;
 
         diff < required_diff
     }
 
     fn consider_order_placement(
         &self,
-        around: f64,
+        fair: f64,
         premium_imbalance: f64,
         benefit: f64,
         prc: f64,
@@ -415,17 +427,15 @@ impl<'a> Tactic<'a> {
     ) -> bool {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
-        let around = around + self.get_position_imbalance_cost(around);
-        let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
+        let around = self.get_around(fair, premium_imbalance);
         // if bitstamp is 10, remote 9, premium is 1
         // expected premium is 2
-        // premium imbalance will be premium - expected which is 1 - 2 == -1
+        // premium imbalance will be expected - premium which is 1 - 2 == -1
         // we expect around to be 11 then
-        // so we subtract premium imbalance from around
+        // so we add premium imbalance to around
         //  or consider bitstamp 11, remote 9
         //  expected 1,
-        //  imbalance is 1, subtract, get bitstamp should be 10
-        let around = around - imbalance_adjustment;
+        //  imbalance is -1, add, get bitstamp should be 10
         let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
@@ -794,6 +804,9 @@ impl<'a> Tactic<'a> {
                     li(first?=false, class="item") {
                         : format!("Desired: {:.2} usd, {:.4} btc",
                                   desired_d, desired_c);
+                    }
+                    li(first?=false, class="item") {
+                        : format!("Last around price: {:.2}", self.last_around.get());
                     }
                     li(first?=false, class="item") {
                         : format!("Position imbalance: {:.2} usd, price offset {:.3}",

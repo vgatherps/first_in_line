@@ -298,12 +298,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 local_book.book(),
                                 local_fair,
                                 displacement_val,
-                                premium - expected_premium,
+                                expected_premium - premium,
                             );
                             tactic.handle_new_orders(
                                 local_fair,
                                 displacement_val,
-                                premium - expected_premium,
+                                expected_premium - premium,
                                 false,
                                 &[
                                     local_book::InsideOrder {
@@ -324,7 +324,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
                             local_fair,
                             displacement_val,
-                            premium - expected_premium,
+                            expected_premium - premium,
                             true,
                             &events,
                         ),
