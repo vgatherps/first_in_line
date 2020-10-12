@@ -794,9 +794,10 @@ impl<'a> Tactic<'a> {
                                   self.position.dollars_available,self.position.coins_available);
                     }
                     li(first?=true, class="item") {
-                        : format!("Matched trading pnl with {:.2} and without {:.2} fees",
+                        : format!("Matched trading pnl with {:.2} and without {:.2} fees, and bps: {:.2}",
                                   self.statistics.fifo.pnl() - trading_fees,
-                                  self.statistics.fifo.pnl());
+                                  self.statistics.fifo.pnl(),
+                                  1_00_00.0 * self.statistics.fifo.pnl() / self.statistics.traded_dollars);
                     }
                     li(first?=true, class="item") {
                         : format!("Position up {:.2} usd, without fees {:.2}",
