@@ -19,6 +19,13 @@ pub struct Arguments {
 
     #[structopt(
         long,
+        default_value = "0.01",
+        help = "Profit reduction when placing inside the spread"
+    )]
+    pub place_inside: f64,
+
+    #[structopt(
+        long,
         default_value = "0.0015",
         help = "Pricing cost of holding a position"
     )]

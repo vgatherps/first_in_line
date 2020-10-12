@@ -72,7 +72,7 @@ struct Delta {
 
 #[derive(Deserialize, Debug)]
 struct SnapshotInner {
-    order_book: Vec<Update>
+    order_book: Vec<Update>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -94,9 +94,10 @@ pub async fn bybit_connection(which: BybitType) -> normalized::MarketDataStream 
         .await
         .expect("Could not connect to coinbase api");
     // What comes first
-    let msg = Message::Text(
-        format!("{{\"op\": \"subscribe\", \"args\": [\"orderBookL2_25.BTC{}\"]}}",
-                which.product_name()));
+    let msg = Message::Text(format!(
+        "{{\"op\": \"subscribe\", \"args\": [\"orderBookL2_25.BTC{}\"]}}",
+        which.product_name()
+    ));
     stream.send(msg).await.expect("Could not request L2 stream");
     // We DON'T await a response since it comes out of order...
     normalized::MarketDataStream::new(stream, which.exchange(), which.convert())
@@ -141,7 +142,7 @@ fn convert_inner(data: Message, which: BybitType) -> DataOrResponse {
                 update,
                 insert,
             }) => delete
-            .iter()
+                .iter()
                 .chain(update.iter())
                 .chain(insert.iter())
                 .map(|Update { price, size, side }| {
@@ -154,23 +155,27 @@ fn convert_inner(data: Message, which: BybitType) -> DataOrResponse {
                         side: *side,
                     })
                 })
-            .collect(),
+                .collect(),
         }
     } else {
-        let futures_snapshot: FuturesSnapshot = serde_json::from_str(&data).expect("Couldn't parse json at all");
+        let futures_snapshot: FuturesSnapshot =
+            serde_json::from_str(&data).expect("Couldn't parse json at all");
         // TODO less copy and paste
         let mut result = SmallVec::new();
         result.push(normalized::MarketEvent::Clear);
-        futures_snapshot.data.iter().for_each(|Update { price, size, side }| {
-            let price: f64 = price.parse::<f64>().expect("Bad floating point");
-            let size: f64 = *size;
-            result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
-                cents: price_to_cents(price),
-                size: which.price_size_dollars(price, size),
-                exchange_time: 0,
-                side: *side,
-            }))
-        });
+        futures_snapshot
+            .data
+            .iter()
+            .for_each(|Update { price, size, side }| {
+                let price: f64 = price.parse::<f64>().expect("Bad floating point");
+                let size: f64 = *size;
+                result.push(normalized::MarketEvent::Book(normalized::BookUpdate {
+                    cents: price_to_cents(price),
+                    size: which.price_size_dollars(price, size),
+                    exchange_time: 0,
+                    side: *side,
+                }))
+            });
         result
     })
 }

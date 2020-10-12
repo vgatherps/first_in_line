@@ -75,7 +75,7 @@ impl RemoteVenueAggregator {
             if size < 10.0 {
                 return None;
             }
-            if i == Exchange::BybitUSDT as usize || i == Exchange:: BybitInverse as usize {
+            if i == Exchange::BybitUSDT as usize || i == Exchange::BybitInverse as usize {
                 size *= 0.3;
             }
             total_price += self.fairs[i] * size;
@@ -108,7 +108,7 @@ impl RemoteVenueAggregator {
             self.coinbase.ping(),
             self.bybit_usdt.ping(),
             self.bybit_inverse.ping(),
-            );
+        );
     }
 
     pub fn get_exchange_description(&self, exch: Exchange) -> String {

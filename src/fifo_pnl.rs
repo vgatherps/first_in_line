@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use crate::order_book::{BuyPrice, SellPrice, SidedPrice};
 
-
 // This could be compressed into one vector, since we never mix buys and sells
 // I find it clearer not to do that
 #[derive(Default)]
@@ -14,7 +13,6 @@ pub struct Fifo {
 }
 
 impl Fifo {
-
     fn validate(&self) {
         assert!(self.sells.len() == 0 || self.buys.len() == 0);
     }
@@ -26,7 +24,7 @@ impl Fifo {
     pub fn dollars(&self) -> f64 {
         self.dollars
     }
-    
+
     pub fn add_buy(&mut self, buy_price: BuyPrice, mut size: f64) {
         self.validate();
         while let Some((sell_price, sell_size)) = self.sells.get_mut(0) {

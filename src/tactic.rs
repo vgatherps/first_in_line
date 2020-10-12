@@ -52,6 +52,7 @@ pub struct Tactic<'a> {
     required_profit: f64,
     required_fees: f64,
     imbalance_adjust: f64,
+    place_inside: f64,
 
     cost_of_position: f64,
 
@@ -132,6 +133,7 @@ impl<'a> Tactic<'a> {
         profit_bps: f64,
         fee_bps: f64,
         cost_of_position: f64,
+        place_inside: f64,
         position: PositionManager,
         statistics: &'a mut TacticStatistics,
         http: std::sync::Arc<crate::bitstamp_http::BitstampHttp>,
@@ -140,6 +142,7 @@ impl<'a> Tactic<'a> {
         Tactic {
             required_profit: 0.01 * profit_bps,
             required_fees: 0.01 * fee_bps,
+            place_inside: 0.01 * place_inside,
             imbalance_adjust: 0.2,
             cancel_mult: 0.3,
             order_manager: OrderManager::new(),
@@ -406,13 +409,14 @@ impl<'a> Tactic<'a> {
         &self,
         around: f64,
         premium_imbalance: f64,
+        benefit: f64,
         prc: f64,
         side: Side,
     ) -> bool {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
         let around = around + self.get_position_imbalance_cost(around);
-        let required_diff = (self.required_fees + self.required_profit) * prc;
+        let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
@@ -435,6 +439,7 @@ impl<'a> Tactic<'a> {
         fair: f64,
         adjust: f64,
         premium_imbalance: f64,
+        genuine: bool,
         orders: &[InsideOrder],
     ) {
         if !self.http.can_send_order() {
@@ -459,10 +464,12 @@ impl<'a> Tactic<'a> {
             assert!(first_buy.side == Side::Buy);
             let buy_prc = first_buy.insert_price as f64 * 0.01;
             let penny_prc = buy_prc + 0.01;
+            let benefit = if genuine { self.place_inside } else { 0.0 };
             let actual_buy_prc = if first_buy.insert_size > 0.5
                 && self.consider_order_placement(
                     adjusted_fair,
                     premium_imbalance,
+                    benefit,
                     penny_prc,
                     Side::Buy,
                 ) {
@@ -470,6 +477,7 @@ impl<'a> Tactic<'a> {
             } else if self.consider_order_placement(
                 adjusted_fair,
                 premium_imbalance,
+                benefit,
                 buy_prc,
                 Side::Buy,
             ) {
@@ -517,10 +525,12 @@ impl<'a> Tactic<'a> {
             assert!(first_sell.side == Side::Sell);
             let sell_prc = first_sell.insert_price as f64 * 0.01;
             let penny_prc = sell_prc - 0.01;
+            let benefit = if genuine { self.place_inside } else { 0.0 };
             let actual_sell_prc = if first_sell.insert_size > 0.5
                 && self.consider_order_placement(
                     adjusted_fair,
                     premium_imbalance,
+                    benefit,
                     penny_prc,
                     Side::Sell,
                 ) {
@@ -528,6 +538,7 @@ impl<'a> Tactic<'a> {
             } else if self.consider_order_placement(
                 adjusted_fair,
                 premium_imbalance,
+                benefit,
                 sell_prc,
                 Side::Sell,
             ) {
@@ -594,10 +605,7 @@ impl<'a> Tactic<'a> {
             // wait 1800ish more seconds, try and cancel order
             // Now that there's better protection against a wall of stale orders at the top,
             // this is a lot less important
-            tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * 1800 as u64,
-            ))
-            .await;
+            tokio::time::delay_for(std::time::Duration::from_millis(1000 * 1800 as u64)).await;
             assert!(sender
                 .send(crate::TacticInternalEvent::CancelStale(side, price, id))
                 .await
@@ -634,7 +642,9 @@ impl<'a> Tactic<'a> {
             self.statistics
                 .recent_trades
                 .push_front((Side::Buy, dollars, trade.size));
-            self.statistics.fifo.add_buy(BuyPrice::new(cents), trade.size);
+            self.statistics
+                .fifo
+                .add_buy(BuyPrice::new(cents), trade.size);
 
             println!(
                 "Trade buy id {} price {:.2} size {:.5}",
@@ -652,7 +662,9 @@ impl<'a> Tactic<'a> {
             self.statistics
                 .recent_trades
                 .push_front((Side::Sell, dollars, trade.size));
-            self.statistics.fifo.add_sell(SellPrice::new(cents), trade.size);
+            self.statistics
+                .fifo
+                .add_sell(SellPrice::new(cents), trade.size);
             println!(
                 "Trade sell id {} price {:.2} size {:.5}",
                 trade.sell_order_id, dollars, trade.size

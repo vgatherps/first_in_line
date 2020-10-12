@@ -140,12 +140,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // and is part of the reset cycle
             let position = position_manager::PositionManager::create(http.clone()).await;
 
-            
             let (
                 mut bitstamp,
                 mut bitstamp_orders,
                 mut bitstamp_trades,
-
                 bitmex,
                 okex_spot,
                 okex_swap,
@@ -154,20 +152,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bybit_inverse,
                 huobi,
                 coinbase,
-
-                ) = join!(
-                    bitstamp_connection(),
-                    bitstamp_orders_connection(),
-                    bitstamp_trades_connection(),
-                    bitmex_connection(),
-                    okex_connection(OkexType::Spot),
-                    okex_connection(OkexType::Swap),
-                    okex_connection(OkexType::Quarterly),
-                    bybit_connection(BybitType::USDT),
-                    bybit_connection(BybitType::Inverse),
-                    huobi_connection(HuobiType::Spot),
-                    coinbase_connection(),
-                    );
+            ) = join!(
+                bitstamp_connection(),
+                bitstamp_orders_connection(),
+                bitstamp_trades_connection(),
+                bitmex_connection(),
+                okex_connection(OkexType::Spot),
+                okex_connection(OkexType::Swap),
+                okex_connection(OkexType::Quarterly),
+                bybit_connection(BybitType::USDT),
+                bybit_connection(BybitType::Inverse),
+                huobi_connection(HuobiType::Spot),
+                coinbase_connection(),
+            );
 
             // Spawn all tasks after we've connected to everything
             tokio::task::spawn(html_writer_loop(event_queue.clone()));
@@ -198,6 +195,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 args.profit_bps,
                 args.fee_bps,
                 args.cost_of_position,
+                args.place_inside,
                 position,
                 &mut statistics,
                 http.clone(),
@@ -285,7 +283,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     TacticEventType::InsideOrders(_) | TacticEventType::WriteHtml => (),
                 }
                 if let (
-                    Some((_, local_fair)),
+                    Some((((bid, _), (ask, _)), local_fair)),
                     Some((displacement_val, expected_premium)),
                     Some(remote_fair),
                 ) = (
@@ -295,17 +293,39 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ) {
                     let premium = local_fair - remote_fair;
                     match &event_type {
-                        TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => tactic
-                            .handle_book_update(
+                        TacticEventType::RemoteFair | TacticEventType::LocalBook(_) => {
+                            tactic.handle_book_update(
                                 local_book.book(),
                                 local_fair,
                                 displacement_val,
                                 premium - expected_premium,
-                            ),
+                            );
+                            tactic.handle_new_orders(
+                                local_fair,
+                                displacement_val,
+                                premium - expected_premium,
+                                false,
+                                &[
+                                    local_book::InsideOrder {
+                                        insert_price: bid,
+                                        insert_size: 0.51,
+                                        most_aggressive_on_side: bid,
+                                        side: Side::Buy,
+                                    },
+                                    local_book::InsideOrder {
+                                        insert_price: ask,
+                                        insert_size: 0.51,
+                                        most_aggressive_on_side: ask,
+                                        side: Side::Sell,
+                                    },
+                                ],
+                            );
+                        }
                         TacticEventType::InsideOrders(events) => tactic.handle_new_orders(
                             local_fair,
                             displacement_val,
                             premium - expected_premium,
+                            true,
                             &events,
                         ),
                         TacticEventType::WriteHtml => {
@@ -319,8 +339,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         <meta http-equiv=\"refresh\" content=\"3\" >
                         </head>
                         <body>
-                        <h4>Going Since {start} </h4>
-                        <h4>Last Update {now} </h4>
                         {tactic}
                         {local}
                         {remote}
@@ -329,8 +347,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         </body>
                         </html>
                         ",
-                                start = start,
-                                now = Local::now(),
                                 tactic = tactic.get_html_info(local_fair),
                                 local = local_book.get_html_info(),
                                 remote = remote_agg.get_html_info(),

@@ -126,14 +126,6 @@ impl LocalBook {
                                       aprice as f64 * 0.01, asize,
                                       fair);
                         }
-                        li(first?=true, class="item") {
-                            : format!("Bids inside spread: {:?}",
-                                      inside_bids.iter().rev().map(|prc| *prc as f64 * 0.01).collect::<Vec<_>>());
-                        }
-                        li(first?=true, class="item") {
-                            : format!("Asks inside spread: {:?}",
-                                      inside_asks.iter().map(|prc| *prc as f64 * 0.01).collect::<Vec<_>>());
-                        }
                     }
                 }
             )
