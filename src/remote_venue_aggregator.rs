@@ -70,10 +70,13 @@ impl RemoteVenueAggregator {
         let mut total_price = 0.0;
         let mut total_size = 0.0;
         for i in 0..(Exchange::COUNT as usize) {
-            let size = self.size_ema[i].get_value().unwrap_or(0.0);
+            let mut size = self.size_ema[i].get_value().unwrap_or(0.0);
             assert!(size >= 0.0);
             if size < 10.0 {
                 return None;
+            }
+            if i == Exchange::BybitUSDT as usize || i == Exchange:: BybitInverse as usize {
+                size *= 0.3;
             }
             total_price += self.fairs[i] * size;
             total_size += size;

@@ -322,6 +322,8 @@ impl BitstampHttp {
             id: String,
         };
 
+        println!("Result is {:?}", result);
+
         serde_json::from_str::<Vec<GetId>>(&result)
             .unwrap()
             .into_iter()

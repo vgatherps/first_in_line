@@ -443,9 +443,9 @@ impl<'a> Tactic<'a> {
         if self.statistics.orders_sent >= self.max_send {
             return;
         }
-        // shuffle +/ 50 dollars on order size
-        let base_dollars = 200.0 + (self.rng.next_f64() - 0.5) * 100.0;
-        assert!(base_dollars > 100.0);
+        // shuffle +/ 15 dollars on order size
+        let base_dollars = 35.0 + self.rng.next_f64() * 15.0;
+        assert!(base_dollars > 35.0);
         let adjusted_fair = fair + adjust;
         if let Some(first_buy) = orders.iter().filter(|o| o.side == Side::Buy).next() {
             if self.max_orders_side <= self.order_manager.num_buys() {
@@ -591,12 +591,11 @@ impl<'a> Tactic<'a> {
                 .await
                 .is_ok());
 
-            // wait 60ish more seconds, try and cancel order
+            // wait 1800ish more seconds, try and cancel order
             // Now that there's better protection against a wall of stale orders at the top,
             // this is a lot less important
-            let random_offset = (id / 19) % 4;
             tokio::time::delay_for(std::time::Duration::from_millis(
-                1000 * (60 + random_offset) as u64,
+                1000 * 1800 as u64,
             ))
             .await;
             assert!(sender
