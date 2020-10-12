@@ -416,18 +416,24 @@ impl<'a> Tactic<'a> {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
         let around = around + self.get_position_imbalance_cost(around);
+        let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
+        // if bitstamp is 10, remote 9, premium is 1
+        // expected premium is 2
+        // premium imbalance will be premium - expected which is 1 - 2 == -1
+        // we expect around to be 11 then
+        // so we subtract premium imbalance from around
+        //  or consider bitstamp 11, remote 9
+        //  expected 1,
+        //  imbalance is 1, subtract, get bitstamp should be 10
+        let around = around - imbalance_adjustment;
         let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
         };
-        // if we're too high, this is positive, so we subtract from the diff
-        // if we're too low, this is negative, to we flip first before subtracting
-        // Here, I do so before multiplying but it has the same effect
-        let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
         let diff = prc - around;
         let diff = diff.min(30.0).max(-30.0);
-        let diff = (diff + imbalance_adjustment) * dir_mult;
+        let diff = diff * dir_mult;
         diff >= required_diff
     }
 
