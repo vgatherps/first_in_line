@@ -171,8 +171,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             tokio::task::spawn(reset_loop(event_queue.clone()));
             tokio::task::spawn(ping_loop(event_queue.clone()));
 
-            let remote_fair_value = FairValue::new(1.0, 0.0, 5.0, 10);
-            let local_fair_value = FairValue::new(0.7, 0.05, 20.0, 20);
+            let remote_fair_value = FairValue::new(1.0, 0.0, 10.0, 20);
+            let local_fair_value = remote_fair_value.clone();
 
             let mut remote_agg = remote_venue_aggregator::RemoteVenueAggregator::new(
                 bitmex,
