@@ -384,10 +384,17 @@ impl<'a> Tactic<'a> {
         self.position.get_position_imbalance(fair) * self.cost_of_position
     }
 
-    fn get_around(&self,
-                  fair: f64,
-                  premium_imbalance: f64) -> f64 {
+    fn get_around(&self, fair: f64, premium_imbalance: f64) -> f64 {
         let around = fair + self.get_position_imbalance_cost(fair);
+        // if bitstamp is 10, remote 9, premium is 1
+        // expected premium is 2
+        // premium imbalance will be expected - premium which is 1 - 2 == -1
+        // we expect around to be 11 then
+        // so we add premium imbalance to around
+        //  or consider bitstamp 11, remote 9
+        //  expected 1,
+        //  imbalance is -1, add, get bitstamp should be 10
+
         let imbalance_adjustment = premium_imbalance * self.imbalance_adjust;
         let around = around + imbalance_adjustment;
         self.last_around.set(around);
@@ -428,15 +435,7 @@ impl<'a> Tactic<'a> {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
         let around = self.get_around(fair, premium_imbalance);
-        // if bitstamp is 10, remote 9, premium is 1
-        // expected premium is 2
-        // premium imbalance will be expected - premium which is 1 - 2 == -1
-        // we expect around to be 11 then
-        // so we add premium imbalance to around
-        //  or consider bitstamp 11, remote 9
-        //  expected 1,
-        //  imbalance is -1, add, get bitstamp should be 10
-        let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
+                let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
@@ -777,6 +776,8 @@ impl<'a> Tactic<'a> {
 
         let up = self.position.get_total_position(fair) - if_held_dollars;
         let trading_fees = self.statistics.fifo.dollars() * self.position.get_fee_estimate();
+        let required_diff =
+            (self.required_fees + self.required_profit - benefit) * self.last_around.get();
         format!(
             "{}{}",
             html! {
@@ -806,7 +807,9 @@ impl<'a> Tactic<'a> {
                                   desired_d, desired_c);
                     }
                     li(first?=false, class="item") {
-                        : format!("Last around price: {:.2}", self.last_around.get());
+                        : format!("Last around price: {:.2}, market {}x{}", self.last_around.get(),
+                        self.last_around.get() - required_diff,
+                        self.last_around.get() + required_diff);
                     }
                     li(first?=false, class="item") {
                         : format!("Position imbalance: {:.2} usd, price offset {:.3}",
