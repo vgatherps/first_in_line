@@ -146,7 +146,7 @@ impl<'a> Tactic<'a> {
             required_fees: 0.01 * fee_bps,
             place_inside: 0.01 * place_inside,
             imbalance_adjust: 0.5,
-            cancel_mult: 0.3,
+            cancel_mult: 0.2,
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
@@ -435,7 +435,7 @@ impl<'a> Tactic<'a> {
         // if we have too many dollars, the position imbalance is positive so we adjust the fair
         // upwards, making us buy more. Selling is reversed
         let around = self.get_around(fair, premium_imbalance);
-                let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
+        let required_diff = (self.required_fees + self.required_profit - benefit) * prc;
         let dir_mult = match side {
             Side::Buy => -1.0,
             Side::Sell => 1.0,
@@ -777,7 +777,7 @@ impl<'a> Tactic<'a> {
         let up = self.position.get_total_position(fair) - if_held_dollars;
         let trading_fees = self.statistics.fifo.dollars() * self.position.get_fee_estimate();
         let required_diff =
-            (self.required_fees + self.required_profit - benefit) * self.last_around.get();
+            (self.required_fees + self.required_profit) * self.last_around.get();
         format!(
             "{}{}",
             html! {
