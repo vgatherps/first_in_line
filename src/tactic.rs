@@ -146,7 +146,7 @@ impl<'a> Tactic<'a> {
             required_fees: 0.01 * fee_bps,
             place_inside: 0.01 * place_inside,
             imbalance_adjust: 0.5,
-            cancel_mult: 0.2,
+            cancel_mult: 0.3,
             order_manager: OrderManager::new(),
             max_orders_side: 16,
             worry_orders_side: 10,
