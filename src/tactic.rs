@@ -807,7 +807,7 @@ impl<'a> Tactic<'a> {
                                   desired_d, desired_c);
                     }
                     li(first?=false, class="item") {
-                        : format!("Last around price: {:.2}, market {}x{}", self.last_around.get(),
+                        : format!("Last around price: {:.2}, market {:.2}x{:.2}", self.last_around.get(),
                         self.last_around.get() - required_diff,
                         self.last_around.get() + required_diff);
                     }
