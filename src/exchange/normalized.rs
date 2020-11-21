@@ -1,7 +1,10 @@
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
-
 use serde::{Deserialize, Serialize};
+
+use std::hash::{Hash, Hasher};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 
 pub type SmallVec<T> = smallvec::SmallVec<[T; 8]>;
 pub type DataStream = async_tungstenite::tokio::TokioWebSocketStream;
@@ -20,13 +23,12 @@ pub enum Exchange {
     BybitInverse,
     Coinbase,
     Bitmex,
-    Ftx,
     // These don't seem to work for some reason
     HuobiSwap,
     HuobiQuarterly,
 }
 
-#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Copy, Clone, Hash)]
 pub enum Side {
     Buy,
     Sell,
@@ -219,9 +221,14 @@ impl MarketDataStream {
                             DataOrResponse::Data(events) => events,
                         };
                         if events.len() > 0 {
+                            let time = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_micros();
+
                             return MarketEventBlock {
                                 events,
-                                received_time: now as u64,
+                                received_time: time as u64,
                                 exchange: self.exchange,
                             };
                         }
