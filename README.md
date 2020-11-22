@@ -1,6 +1,6 @@
 A mix of some signal framework infrastructure and a first-in-line market maker.
 This was mostly cobbled together over about a week or so, with the signal framework coming later.
-As a result, the code is quote hacky/hardcoded, and some of the signals are pretty mediocre.
+As a result, the code is quite hacky/hardcoded, and some of the signals are pretty mediocre.
 Take using message rate instead of time for ewmas or generally ignoring trades/fills,
 decision made to save time that I never got around to fixing.
 
